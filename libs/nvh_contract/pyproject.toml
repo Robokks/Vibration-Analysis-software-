@@ -1,0 +1,16 @@
+[project]
+name = "nvh-contract"
+version = "0.1.0"
+description = "Shared data contract (pydantic + SQLAlchemy models) for the NVH analysis system"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "sqlalchemy>=2.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

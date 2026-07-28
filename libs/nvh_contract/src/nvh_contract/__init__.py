@@ -1,0 +1,28 @@
+from nvh_contract.models import (
+    Channel,
+    DcRecord,
+    Direction,
+    Domain,
+    GradingResult,
+    MasterSignature,
+    Model,
+    OverallResult,
+    SpcPoint,
+    TestRun,
+)
+
+CONTRACT_VERSION = "1.0"
+
+__all__ = [
+    "CONTRACT_VERSION",
+    "Channel",
+    "DcRecord",
+    "Direction",
+    "Domain",
+    "GradingResult",
+    "MasterSignature",
+    "Model",
+    "OverallResult",
+    "SpcPoint",
+    "TestRun",
+]

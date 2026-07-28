@@ -1,0 +1,18 @@
+[project]
+name = "analysis-engine"
+version = "0.1.0"
+description = "NVH signal analysis, grading, fault detection, and SPC for the EOL gearbox test system"
+requires-python = ">=3.11"
+dependencies = [
+    "nvh-contract",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pyarrow>=15.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
