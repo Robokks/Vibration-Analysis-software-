@@ -12,16 +12,6 @@ from nvh_contract.models import DcRecord, Model, TestRun
 from pydantic import BaseModel
 
 
-class SignalStatsOut(BaseModel):
-    mean: float
-    variance: float
-    skewness: float
-    kurtosis: float
-    rms: float
-    peak: float
-    crest: float
-
-
 class OrderSpectrumOut(BaseModel):
     order: list[float]
     magnitude: list[float]
@@ -57,7 +47,7 @@ class GradingSummaryOut(BaseModel):
 class DcAnalysisResultOut(BaseModel):
     gear_label: str
     direction: str
-    stats: SignalStatsOut
+    parameters: dict[str, float]
     order_spectrum: OrderSpectrumOut
     order_tracking: OrderTrackingOut
     crash_noise: CrashNoiseOut

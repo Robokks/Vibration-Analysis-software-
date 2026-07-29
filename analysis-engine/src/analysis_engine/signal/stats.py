@@ -38,3 +38,10 @@ def compute_stats(x: np.ndarray) -> SignalStats:
         peak=peak,
         crest=crest,
     )
+
+
+STAT_NAMES = ("mean", "variance", "skewness", "kurtosis", "rms", "peak", "crest")
+
+
+def stats_to_dict(stats: SignalStats) -> dict[str, float]:
+    return {name: getattr(stats, name) for name in STAT_NAMES}

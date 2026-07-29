@@ -12,14 +12,21 @@ from nvh_api_schemas.report import (
     NumericTableRowOut,
     OrderSpectrumOut,
     OrderTrackingOut,
-    SignalStatsOut,
     SlippageOut,
     SummaryReportOut,
     SummaryRowOut,
     XChartOut,
 )
 
+# Governs the analysis-engine -> nvh_api_schemas report-shape boundary
+# (the Consolidated/Detailed/Summary report wire schemas in report.py). This
+# is independent of nvh_contract.CONTRACT_VERSION, which governs the
+# separate Parquet/DB manifest boundary -- see docs/data-contract.md's
+# "Report/API contract versioning" section.
+REPORT_SCHEMA_VERSION = "2.0"
+
 __all__ = [
+    "REPORT_SCHEMA_VERSION",
     "FailReasonRollup",
     "PassRateRollup",
     "LiveDcUpdate",
@@ -35,7 +42,6 @@ __all__ = [
     "NumericTableRowOut",
     "OrderSpectrumOut",
     "OrderTrackingOut",
-    "SignalStatsOut",
     "SlippageOut",
     "SummaryReportOut",
     "SummaryRowOut",

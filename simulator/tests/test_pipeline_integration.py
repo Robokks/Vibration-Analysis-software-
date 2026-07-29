@@ -6,9 +6,9 @@ result with no hardware and no web UI involved."""
 
 import numpy as np
 
+from analysis_engine.grading.parameters import default_full_scale_by_param
 from analysis_engine.ordermatrix.gear_math import GearTeeth, compute_gear_orders
-from analysis_engine.pipeline import STAT_NAMES, analyze_dc_record, build_masters_from_trials
-from analysis_engine.signal.stats import compute_stats
+from analysis_engine.pipeline import analyze_dc_record, build_masters_from_trials, compute_trial_parameters
 from nvh_simulator.faults import Fault
 from nvh_simulator.generators import generate_dc_record
 
@@ -16,21 +16,21 @@ GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft_1=36, la
 SAMPLE_RATE_HZ = 5000
 RPM_START, RPM_END = 1000, 2500
 DURATION_S = 4.0
-FULL_SCALE_BY_STAT = {name: 10.0 for name in STAT_NAMES}
+FULL_SCALE_BY_PARAM = default_full_scale_by_param()
 
 
-def _trial_stats(seed: int):
+def _trial_parameters(seed: int):
     rng = np.random.default_rng(seed)
     sig = generate_dc_record(GEAR_R, RPM_START, RPM_END, DURATION_S, SAMPLE_RATE_HZ, rng=rng)
-    return compute_stats(sig.channels["vib_a"])
+    return compute_trial_parameters(sig.channels["vib_a"], sig.time_s, sig.rpm, GEAR_R)
 
 
 def test_healthy_unit_passes_against_master_built_from_trials():
     # a larger trial population gives the master's band_min/band_max a
     # realistic spread; too few trials makes the G-ladder unrealistically
     # tight around whatever phase/noise realization happened to occur.
-    trial_stats = [_trial_stats(seed) for seed in range(10, 60)]
-    masters = build_masters_from_trials(trial_stats, FULL_SCALE_BY_STAT)
+    trial_parameters = [_trial_parameters(seed) for seed in range(10, 60)]
+    masters = build_masters_from_trials(trial_parameters, FULL_SCALE_BY_PARAM)
 
     rng = np.random.default_rng(999)  # a fresh, healthy unit, unseen by the master
     healthy = generate_dc_record(GEAR_R, RPM_START, RPM_END, DURATION_S, SAMPLE_RATE_HZ, rng=rng)
@@ -44,8 +44,8 @@ def test_healthy_unit_passes_against_master_built_from_trials():
 
 
 def test_crash_noise_fault_is_flagged():
-    trial_stats = [_trial_stats(seed) for seed in range(10, 20)]
-    masters = build_masters_from_trials(trial_stats, FULL_SCALE_BY_STAT)
+    trial_parameters = [_trial_parameters(seed) for seed in range(10, 20)]
+    masters = build_masters_from_trials(trial_parameters, FULL_SCALE_BY_PARAM)
 
     rng = np.random.default_rng(1234)
     fault = Fault(kind="crash_noise", start_s=2.0, end_s=2.3, amplitude=8.0)

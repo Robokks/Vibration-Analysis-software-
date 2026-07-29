@@ -57,12 +57,17 @@ def test_seed_populates_all_contract_tables(seeded):
             for table in ("models", "test_runs", "dc_records", "master_signatures", "grading_results", "spc_points")
         }
 
+    # GEAR_R (in seed_demo_data.py) has no fdr_teeth/fd_sel, so the CM_H*
+    # harmonic parameters (9 of the 49-entry catalog) are always absent for
+    # it -- both master-building and every run's own parameter computation
+    # use this same gear, so the present-parameter count is deterministic
+    # and identical across both (n_master_params), not the full 49.
     assert counts["models"] == 1
     assert counts["test_runs"] == len(summary["runs"])
     assert counts["dc_records"] == len(summary["runs"])
-    assert counts["master_signatures"] == 7  # one per STAT_NAME
-    assert counts["grading_results"] == 7 * len(summary["runs"])
-    assert counts["spc_points"] == 7 * len(summary["runs"])
+    assert counts["master_signatures"] == summary["n_master_params"]
+    assert counts["grading_results"] == summary["n_master_params"] * len(summary["runs"])
+    assert counts["spc_points"] == summary["n_master_params"] * len(summary["runs"])
 
 
 def test_seed_scenarios_produce_expected_results(seeded):

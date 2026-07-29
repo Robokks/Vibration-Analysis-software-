@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 from analysis_engine.grading.envelope_check import EnvelopeCheckResult
 from analysis_engine.grading.master_builder import MasterSignatureStats
-from analysis_engine.pipeline import stats_to_dict
 from analysis_engine.reports.consolidated import ConsolidatedReport
 
 
@@ -32,7 +31,7 @@ def build_detailed_report(
     domain: str = "time",
 ) -> DetailedReport:
     masters = masters or {}
-    stat_values = stats_to_dict(consolidated.result.stats)
+    stat_values = consolidated.result.parameters
     per_stat_grading = (
         consolidated.result.grading.per_stat if consolidated.result.grading is not None else {}
     )

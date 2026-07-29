@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from nvh_contract.models import DcRecord, TestRun
 
-from analysis_engine.pipeline import DcAnalysisResult, stats_to_dict
+from analysis_engine.pipeline import DcAnalysisResult
 from analysis_engine.spc.histogram import HistogramResult, compute_histogram
 from analysis_engine.spc.xchart import XChartResult, compute_xchart
 
@@ -37,7 +37,7 @@ def build_summary_report(
     if not rows:
         raise ValueError("need at least one row to build a summary report")
 
-    values = [stats_to_dict(row.result.stats)[stat_name] for row in rows]
+    values = [row.result.parameters[stat_name] for row in rows]
 
     return SummaryReport(
         model_id=rows[0].test_run.model_id,

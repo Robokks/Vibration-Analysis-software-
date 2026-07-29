@@ -70,13 +70,24 @@ def synthesize_channel(
     noise_std: float,
     rng: np.random.Generator,
     order_envelopes: dict[float, callable] | None = None,
+    amplitude_jitter_std: float = 0.03,
 ) -> np.ndarray:
+    """`amplitude_jitter_std` draws one multiplicative jitter factor per
+    order per call (not per sample) -- a stand-in for real unit-to-unit
+    variance (mounting, meshing quality, bearing wear) that a real
+    accelerometer would show between nominally-identical healthy units.
+    Without it, gear-mesh order amplitudes are perfectly deterministic
+    (only phase varies), which makes any order-spectrum-peak-based grading
+    (e.g. the IN_H*/CM_H* harmonic parameters) build a razor-thin G-ladder
+    band from trial data and then fail healthy units on FFT-bin noise
+    alone."""
     signal = np.zeros_like(theta)
     order_envelopes = order_envelopes or {}
     for order, amplitude in orders.items():
         phase0 = rng.uniform(0.0, 2 * np.pi)
+        jitter = rng.normal(1.0, amplitude_jitter_std) if amplitude_jitter_std else 1.0
         envelope = order_envelopes.get(order)
-        amp = amplitude * envelope(t) if envelope is not None else amplitude
+        amp = amplitude * jitter * envelope(t) if envelope is not None else amplitude * jitter
         signal += amp * np.sin(order * theta + phase0)
     signal += rng.normal(0.0, noise_std, size=theta.shape)
     return signal

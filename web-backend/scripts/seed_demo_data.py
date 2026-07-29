@@ -21,9 +21,9 @@ from pathlib import Path
 
 import numpy as np
 
+from analysis_engine.grading.parameters import default_full_scale_by_param
 from analysis_engine.ordermatrix.gear_math import GearTeeth, compute_gear_orders
-from analysis_engine.pipeline import STAT_NAMES, analyze_dc_record, build_masters_from_trials, stats_to_dict
-from analysis_engine.signal.stats import compute_stats
+from analysis_engine.pipeline import analyze_dc_record, build_masters_from_trials, compute_trial_parameters
 from nvh_contract import CONTRACT_VERSION
 from nvh_contract.db import (
     DcRecordRow,
@@ -48,9 +48,7 @@ RPM_START, RPM_END = 1000.0, 2500.0
 DURATION_S = 4.0
 PLANT_ID, LINE_ID, STATION_ID = "PLANT1", "LINE1", "STATION-1"
 CHANNEL_NAME = "vib_a"
-FULL_SCALE_BY_STAT = {
-    "mean": 10.0, "variance": 10.0, "skewness": 10.0, "kurtosis": 30.0, "rms": 10.0, "peak": 20.0, "crest": 5.0,
-}
+FULL_SCALE_BY_PARAM = default_full_scale_by_param()
 
 GEAR_R = compute_gear_orders(GEAR_LABEL, GearTeeth(drive_shaft=12, idler_shaft_1=36, layshaft=32), gear_ratio=3.753)
 
@@ -94,11 +92,13 @@ def seed(data_root: Path, db_url: str, n_trials: int, seed_value: int) -> dict:
         )
         session.commit()
 
-        trial_stats = []
+        trial_parameters = []
         for _ in range(n_trials):
             trial_signal = generate_dc_record(GEAR_R, RPM_START, RPM_END, DURATION_S, SAMPLE_RATE_HZ, rng=rng)
-            trial_stats.append(compute_stats(trial_signal.channels[CHANNEL_NAME]))
-        masters = build_masters_from_trials(trial_stats, FULL_SCALE_BY_STAT)
+            trial_parameters.append(
+                compute_trial_parameters(trial_signal.channels[CHANNEL_NAME], trial_signal.time_s, trial_signal.rpm, GEAR_R)
+            )
+        masters = build_masters_from_trials(trial_parameters, FULL_SCALE_BY_PARAM)
 
         created_at = _now_iso()
         for stat_name, master in masters.items():
@@ -179,7 +179,7 @@ def seed(data_root: Path, db_url: str, n_trials: int, seed_value: int) -> dict:
                     )
 
             recorded_at = _now_iso()
-            for stat_name, value in stats_to_dict(result.stats).items():
+            for stat_name, value in result.parameters.items():
                 session.add(
                     SpcPointRow(
                         serial_number=serial_number, model_id=MODEL_ID, gear_label=GEAR_LABEL,
@@ -190,7 +190,12 @@ def seed(data_root: Path, db_url: str, n_trials: int, seed_value: int) -> dict:
             session.commit()
             seeded_runs.append({"label": label, "test_run_id": test_run_id, "dc_id": dc_id, "result": dc_row.result})
 
-        return {"model_id": MODEL_ID, "n_trials": n_trials, "runs": seeded_runs}
+        return {
+            "model_id": MODEL_ID,
+            "n_trials": n_trials,
+            "runs": seeded_runs,
+            "n_master_params": len(masters),
+        }
 
 
 def main() -> None:
