@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 100" width="132" height="100">
+  <!--
+    Meshing gear-tooth glyph, the app's signature element:
+      - live-test-running indicator (rotate the two <g> groups in opposite directions)
+      - the outline the PASS/FAIL stamp is cut into
+      - a faint watermark on printed/exported reports
+    Colors are left as currentColor / fill placeholders so each renderer (web CSS,
+    Qt QPainter, print/PDF) applies its own palette from tokens.json at draw time.
+  -->
+  <g id="gear-left" fill="currentColor">
+    <polygon points="64.00,50.00 71.63,54.69 68.73,63.62 59.80,62.93 59.80,62.93 63.21,71.21 55.62,76.73 48.80,70.92 48.80,70.92 46.69,79.63 37.31,79.63 35.20,70.92 35.20,70.92 28.38,76.73 20.79,71.21 24.20,62.93 24.20,62.93 15.27,63.62 12.37,54.69 20.00,50.00 20.00,50.00 12.37,45.31 15.27,36.38 24.20,37.07 24.20,37.07 20.79,28.79 28.38,23.27 35.20,29.08 35.20,29.08 37.31,20.37 46.69,20.37 48.80,29.08 48.80,29.08 55.62,23.27 63.21,28.79 59.80,37.07 59.80,37.07 68.73,36.38 71.63,45.31 64.00,50.00" />
+    <circle cx="42" cy="50" r="8" fill="none" stroke="currentColor" stroke-width="3" />
+  </g>
+  <g id="gear-right" fill="currentColor">
+    <polygon points="113.00,50.00 119.45,54.90 115.20,63.72 107.35,61.73 107.35,61.73 107.55,69.82 98.00,72.00 94.66,64.62 94.66,64.62 88.45,69.82 80.80,63.72 84.49,56.51 84.49,56.51 76.55,54.90 76.55,45.10 84.49,43.49 84.49,43.49 80.80,36.28 88.45,30.18 94.66,35.38 94.66,35.38 98.00,28.00 107.55,30.18 107.35,38.27 107.35,38.27 115.20,36.28 119.45,45.10 113.00,50.00" />
+    <circle cx="98" cy="50" r="6" fill="none" stroke="currentColor" stroke-width="3" />
+  </g>
+</svg>

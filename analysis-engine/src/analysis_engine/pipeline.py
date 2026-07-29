@@ -21,7 +21,7 @@ from analysis_engine.signal.stats import SignalStats, compute_stats
 STAT_NAMES = ("mean", "variance", "skewness", "kurtosis", "rms", "peak", "crest")
 
 
-def _stats_to_dict(stats: SignalStats) -> dict[str, float]:
+def stats_to_dict(stats: SignalStats) -> dict[str, float]:
     return {name: getattr(stats, name) for name in STAT_NAMES}
 
 
@@ -67,7 +67,7 @@ def analyze_dc_record(
     baseline_magnitude = float(np.median(tracking.magnitude)) or 1e-9
     slip = detect_slippage(tracking.magnitude, baseline_magnitude, slippage_drop_ratio, slippage_min_fraction)
 
-    grading = grade_dc_record(_stats_to_dict(stats), masters) if masters else None
+    grading = grade_dc_record(stats_to_dict(stats), masters) if masters else None
 
     fail_reasons = []
     if crash.detected:

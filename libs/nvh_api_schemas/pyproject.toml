@@ -1,13 +1,11 @@
 [project]
-name = "nvh-contract"
+name = "nvh-api-schemas"
 version = "0.1.0"
-description = "Shared data contract (pydantic + SQLAlchemy models) for the NVH analysis system"
+description = "Shared pydantic wire schemas for the NVH web backend and Qt desktop client — one Python source of truth for the API contract"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.6",
-    "sqlalchemy>=2.0",
-    "numpy>=1.26",
-    "pyarrow>=15.0",
+    "nvh-contract",
 ]
 
 [build-system]
