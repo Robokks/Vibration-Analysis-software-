@@ -1,0 +1,26 @@
+[project]
+name = "nvh-web-backend"
+version = "0.1.0"
+description = "FastAPI backend serving the NVH demo SQLite DB for the web/Qt Report GUI clients"
+requires-python = ">=3.11"
+dependencies = [
+    "nvh-contract",
+    "nvh-api-schemas",
+    "analysis-engine",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+nvh-web-backend = "nvh_web_backend.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+python_classes = ["*Tests"]

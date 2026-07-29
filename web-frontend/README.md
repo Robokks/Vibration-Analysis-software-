@@ -1,10 +1,15 @@
 # web-frontend
 
-Vite + React + TypeScript + Tailwind scaffold for the NVH Report GUI web
-client. **GUI scaffolding only — no live data wiring.** Every screen renders
-placeholder content and carries a `TODO:` banner explaining what it wires up
-to once the corresponding backend phase lands (see `PROGRESS.md` at the repo
-root for Phase C–E status).
+Vite + React + TypeScript + Tailwind Report GUI web client. **Master Entry**
+and **Reports** are wired to a live [`../web-backend`](../web-backend)
+FastAPI service (`src/lib/api.ts`) and show the real seeded demo dataset
+(one model/program/gear/direction, 3 test-run scenarios). **Live Display**
+is still a placeholder (`TODO:` banner) — it needs a continuous live stream
+and nothing in this codebase produces one yet.
+
+Run `../web-backend`'s server first (see its own README), then `npm run
+dev` here — set `VITE_API_BASE_URL` (defaults to `http://localhost:8000`,
+see `.env.development`) if the backend runs somewhere else.
 
 ## Design tokens
 

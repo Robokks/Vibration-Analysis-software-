@@ -18,12 +18,16 @@ for the shared visual design system.
   thing in the repo to actually write that data.
 - **GUI scaffolding: done.** `web-frontend/` (Vite+React+TS+Tailwind) and
   `qt-app/` (PySide6) app shells, sharing one visual language derived from
-  `design-tokens`. Every screen is a placeholder marked `TODO:` — **no live
-  data wiring yet**; that follows once Phase C–E and the FastAPI backend
-  land.
-- **Not yet built**: the FastAPI backend (M1), wiring the web frontend (M2)
-  and Qt desktop app (M3) to real data, the AI layer, and real LabVIEW
-  hardware integration.
+  `design-tokens`.
+- **M1 slice: done.** `web-backend/` — a FastAPI service serving the demo
+  SQLite DB (reconstructing full analysis results on the fly from the raw
+  Parquet signal + DB config rows, never from persisted grading snapshots).
+  Both GUI clients' **Master Entry** and **Reports** screens are wired to it
+  end-to-end (real gear/parameter/master/limit data, real
+  Consolidated/Detailed/Summary/Code-Result reports across the 3 demo test
+  runs). **Live Display stays a placeholder** — it needs a continuous live
+  stream and nothing in this codebase produces one yet.
+- **Not yet built**: the AI layer and real LabVIEW hardware integration.
 
 ## Packages
 
@@ -34,16 +38,17 @@ for the shared visual design system.
 | `design-tokens` | Canonical design tokens (color, type, layout, signature gear-glyph asset) shared by the web and Qt clients |
 | `analysis-engine` | Order-matrix computation, spectral/order analysis, grading, fault detection, SPC, and report assembly (Consolidated/Detailed/Summary) |
 | `simulator` | Synthetic gearbox NVH signal generator conforming to the data contract, with injectable faults for testing |
-| `web-backend/scripts/seed_demo_data.py` | Seeds a demo dataset (Parquet + DB rows) — precedes the FastAPI app itself, which is a later milestone |
-| `web-frontend` | Vite+React+TS+Tailwind Report GUI web client — app shell + Live Display/Master Entry/Reports screens, GUI scaffolding only (see its own README) |
-| `qt-app` | PySide6 Report GUI desktop client — same screens, same design tokens, GUI scaffolding only (see its own README) |
+| `web-backend/scripts/seed_demo_data.py` | Seeds a demo dataset (Parquet + DB rows) that `web-backend`'s FastAPI app serves |
+| `web-backend` (`nvh_web_backend`) | FastAPI backend serving the demo SQLite DB — reconstructs live analysis results from Parquet + DB config rows on every request, never from persisted grading snapshots (see its own README) |
+| `web-frontend` | Vite+React+TS+Tailwind Report GUI web client — Master Entry/Reports wired to `web-backend`, Live Display still a placeholder (see its own README) |
+| `qt-app` | PySide6 Report GUI desktop client — same screens, same backend, same design tokens (see its own README) |
 
 ## Setup
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e libs/nvh_contract -e libs/nvh_api_schemas -e design-tokens \
-  -e analysis-engine -e simulator pytest
+  -e analysis-engine -e simulator -e web-backend pytest
 ```
 
 ## Run the end-to-end analysis demo
@@ -63,12 +68,22 @@ through the full analysis pipeline, printing PASS/FAIL for each.
 ```
 
 Writes Parquet files under `./data/nvh_demo/` and a SQLite DB
-(`nvh_demo.db`) with one healthy and two faulted test runs — the dataset a
-future backend/frontend/Qt app would read from.
+(`nvh_demo.db`) with one healthy and two faulted test runs — the dataset
+`web-backend` serves to the web/Qt clients.
+
+## Run the backend + a GUI client
+
+```bash
+NVH_DB_URL="sqlite:///./data/nvh_demo/nvh_demo.db" .venv/bin/nvh-web-backend
+```
+
+Then, in another terminal: `cd web-frontend && npm run dev` (Vite dev
+server, `http://localhost:5173`), or `.venv/bin/nvh-qt-app` (desktop). Both
+clients' Master Entry and Reports screens will show the seeded demo data.
 
 ## Run the tests
 
 ```bash
 .venv/bin/python -m pytest analysis-engine/tests simulator/tests libs/nvh_contract/tests \
-  libs/nvh_api_schemas/tests design-tokens/tests web-backend/tests -q
+  libs/nvh_api_schemas/tests design-tokens/tests web-backend/tests qt-app/tests -q
 ```

@@ -518,6 +518,120 @@ always-absent `CM_H*` harmonics for `GEAR_R`, matching the existing
 "What's next" section (Phases A–E now all complete, next up is M1) and
 appended this transcript to `CONVERSATION_LOG.md`.
 
+### Turn — "do"
+**User:** "do"
+
+**Assistant:** Interpreted this as "go ahead with M1," the milestone just
+named as next-up. Given the scale (a brand-new FastAPI service plus
+wiring two GUI clients built in different stacks), entered plan mode
+rather than guessing at scope. Researched the current state directly
+(confirmed `web-backend/` had only `scripts/`+`tests/`, no app code yet;
+listed every `nvh_api_schemas`/`nvh_contract.db` shape available to build
+from; read every screen's exact `TODO:` banner text in both GUI clients)
+before asking the user two scoping questions via `AskUserQuestion`: how
+much of M1 to cover this round, and how to handle Live Display's need for
+a continuous live stream that nothing in this codebase produces yet.
+
+**User (answers):** "Backend + wire both GUIs" / "Defer it (Recommended)"
+— i.e., build the FastAPI backend and wire both `web-frontend` and
+`qt-app`'s Master Entry + Reports screens to it, leaving Live Display a
+placeholder since there's no live data source to wire it to.
+
+**Assistant:** Drafted a fixed API contract (endpoints + response shapes)
+covering exactly what Master Entry + Reports need from the seeded demo
+dataset, then launched three parallel Plan sub-agents against that same
+contract — one designing the backend implementation, one designing
+`web-frontend`'s wiring, one designing `qt-app`'s wiring — each reading
+the actual code rather than guessing. All three came back with real,
+independently-found corrections:
+- The backend agent found `DcAnalysisResult.passed` is a computed
+  `@property` that `to_jsonable()` never emits — every report payload
+  needs it injected manually before schema validation (already the exact
+  pattern `libs/nvh_api_schemas/tests/test_report_schema_contract.py`
+  establishes). It also found my draft contract was missing a
+  `/models/{id}/summary` endpoint even though `nvh_api_schemas.
+  SummaryReportOut` already exists and is buildable from
+  `analysis_engine.reports.summary`.
+- Both frontend-wiring agents, working from my incomplete contract
+  (missing that summary endpoint), independently proposed *replacing* the
+  scaffold's existing "Summary" tab with a new "Code-Result" tab. Caught
+  this myself when reconciling all three agents' output: the existing
+  Summary tab (built in an earlier session) is real, already-working
+  functionality, not a placeholder — the fix is to add Code-Result as a
+  **4th** tab in both clients, not discard Summary. Recorded this
+  explicitly in the final plan's Context section so the reasoning wasn't
+  lost.
+- The qt-app agent recommended `QNetworkAccessManager` (PySide6's own
+  async networking) over `httpx`+`QThread`, since the latter would add a
+  second concurrency model (asyncio) that then has to be bridged back
+  into Qt's event loop for no real benefit at this app's scale (a scaffold
+  demo app talking to a local backend) — zero new dependency needed.
+- The web-frontend agent recommended plain `fetch` + one small shared
+  hook over introducing TanStack Query, for the same "matches this app's
+  actual current scale, don't add a dependency disproportionate to seven
+  endpoint calls" reasoning.
+
+Wrote the consolidated plan (reconciling all three agents' output, with
+the Summary/Code-Result correction folded in) to `/root/.claude/plans/
+modular-coalescing-adleman.md`, overwriting Phase E's completed plan.
+
+**User:** approved the plan (via the ExitPlanMode tool's approval flow,
+after an interrupted tool call that the harness resolved as approval).
+
+### Turn — M1 implementation
+**Assistant:** Implemented the full approved plan: new `web-backend`
+package (`nvh_web_backend` — `adapters.py`, `catalog_service.py`,
+`report_service.py`, `routers/{health,models,test_runs,reports}.py`,
+`app.py`/`config.py`/`db.py`, its own `pyproject.toml` and README) plus a
+new `nvh_api_schemas.catalog.ParameterCatalogRowOut` schema; rewired
+`web-frontend`'s `MasterEntry.tsx`/`Reports.tsx` against a new `src/lib/
+api.ts`/`useApi.ts` + `Panel`/`AsyncSection`/`DemoDataNote` components,
+with `Reports.tsx` gaining the 4th Code-Result tab alongside the existing
+three; rewired `qt-app`'s `MasterEntryScreen`/`ReportsScreen` against a
+new `api_client.py` (`QNetworkAccessManager`-based), with an injectable
+`api_client` constructor parameter on both screens and a `FakeApiClient`
+test double so the new widget tests need no live backend or network
+access.
+
+Verified far beyond just running the automated test suites: installed
+everything into a fresh venv, ran the backend's own pytest suite (34
+tests, using `TestClient` against a freshly-seeded tmp-path DB), then
+additionally started the real `uvicorn` server against a real seeded demo
+SQLite DB and `curl`'d every single endpoint by hand to see actual JSON
+responses before touching either GUI client. Then drove both real
+clients against that same live backend end-to-end — the Vite dev server
+via a headless-Chromium script (screenshotting Master Entry and all 4
+Reports tabs, checking for zero console errors and zero failed network
+responses), and the real Qt app under `QT_QPA_PLATFORM=offscreen` with
+the event loop actually spinning (`app.processEvents()` in a loop, not
+just constructing widgets) so `QNetworkAccessManager`'s async requests
+had a chance to complete, screenshotting the same set of screens/tabs.
+Caught and fixed a real cosmetic bug this way that no unit test would
+have surfaced: `order_number`/`orders` values for non-integer harmonic
+orders (`OUTPUT_S1.0`) were rendering as raw floating-point noise
+(`0.2664535038635758`) in both clients' tables — fixed by formatting to a
+fixed precision in both `MasterEntry.tsx`/`Reports.tsx` (web) and (already
+correctly formatted from the start, since I wrote it after noticing the
+web-side bug) `master_entry.py`/`reports.py` (Qt).
+
+Also caught, only when running the full cross-package suite together
+(not each package's tests in isolation): `qt-app/tests/test_reports.py`
+collided at import time with the pre-existing, unrelated
+`analysis-engine/tests/test_reports.py` (same basename, no per-package
+`__init__.py`, pytest's default import mode gets confused about which
+`test_reports` module is being collected) — fixed by renaming the new
+file to `test_reports_screen.py`, following the sibling `test_master_
+entry.py`'s naming convention instead of colliding with existing test
+files project-wide.
+
+Full cross-package regression: **184/184 tests passing** (backend 34 new,
+qt-app 9 new) plus `web-frontend`'s typecheck/build clean. Updated the
+root `README.md` (status, packages table, setup/run/test commands),
+`web-frontend`/`qt-app`'s own `package.json`/READMEs (no longer "scaffold
+only" for the two wired screens), added `web-backend/README.md` (didn't
+exist before), and this session's `PROGRESS.md`/`CONVERSATION_LOG.md`
+entries.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)

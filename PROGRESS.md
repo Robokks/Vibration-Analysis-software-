@@ -6,6 +6,75 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-29 17:06 UTC — M1 slice: FastAPI backend + wire Master Entry/Reports in both GUI clients
+
+First work against M1 now that Phases A–E are complete. Scope (confirmed
+with the user, including deferring live-stream work): build the FastAPI
+backend the GUI scaffolds' `TODO:` banners were waiting on, and wire
+**Master Entry** and **Reports** to it in both `web-frontend` and
+`qt-app`. **Live Display stays a placeholder** — it needs a continuous
+live stream and nothing in this codebase produces one yet.
+
+- New `web-backend` package (`nvh_web_backend`, first `pyproject.toml`
+  under `web-backend/` — previously just `scripts/`+`tests/`). Every
+  report endpoint reconstructs a live `DcAnalysisResult` per request (raw
+  Parquet signal + DB config rows → `analyze_dc_record()`), never reading
+  back from the persisted `grading_results`/`spc_points` snapshot tables
+  (those never carried enough data to reconstruct a full result — the
+  same "compose from live analysis output" convention every
+  `analysis_engine.reports.*` builder already follows).
+- New `nvh_api_schemas.catalog.ParameterCatalogRowOut` — a DB-catalog
+  schema (not an analysis-engine report shape, not a plain rollup) backing
+  Master Entry's per-parameter master/limit/table-config view.
+- Endpoints: `/models`, `/models/{id}`, `/models/{id}/programs`,
+  `/models/{id}/programs/{program}/parameters`, `/test-runs`,
+  `/test-runs/{id}`, `/dc-records/{id}/reports/{consolidated,detailed,
+  code-result}`, `/models/{id}/summary` — all read-only, `program_name`
+  optional throughout (omitted → grade via masters/G-ladder; supplied →
+  grade via that program's LIMIT/THRESHOLD, and code-result additionally
+  gets `apply_table_config()`'d).
+- `web-frontend`: new `src/lib/api.ts` (typed client) + `useApi.ts` (one
+  shared fetch-state hook, no query library — a handful of one-shot GETs
+  against a tiny fixed demo dataset doesn't justify one yet) + `Panel`/
+  `AsyncSection`/`DemoDataNote` components. `MasterEntry.tsx`/`Reports.tsx`
+  rewired to real data; `Reports.tsx` gained a **4th tab** (Code-Result,
+  alongside the existing Consolidated/Detailed/Summary — not a
+  replacement, see the planning note below).
+- `qt-app`: new `api_client.py` built on `QNetworkAccessManager` (PySide6's
+  own async networking, zero new dependency — not httpx+QThread, which
+  would add a second concurrency model for no benefit at this app's
+  scale). `MasterEntryScreen`/`ReportsScreen` rewired the same way, with
+  an injectable `api_client` constructor parameter + a `FakeApiClient` test
+  double so widget tests don't need a live backend or network access.
+- **Planning correction, worth recording:** the API contract I initially
+  handed to two parallel planning sub-agents (backend design, web-frontend
+  wiring, qt-app wiring) omitted a `/summary` endpoint, so both frontend
+  agents independently proposed *replacing* the scaffold's existing
+  "Summary" tab with "Code-Result." The backend agent, reading the actual
+  code, found `nvh_api_schemas.SummaryReportOut` already exists and is
+  buildable — Summary was real, already-built functionality, not a
+  placeholder to discard. Fixed by adding Code-Result as a 4th tab in both
+  clients instead of replacing anything.
+- Planned via three parallel Plan sub-agents (backend design, web-frontend
+  wiring, qt-app wiring) against that (corrected) fixed contract. The
+  backend agent also caught a real gotcha: `DcAnalysisResult.passed` is a
+  computed `@property`, so `to_jsonable()` never emits it — every report
+  payload needs it injected manually before validation (the exact pattern
+  `test_report_schema_contract.py` already established).
+- Verified end-to-end beyond the automated test suites: ran the real
+  `uvicorn` server against a freshly seeded demo DB, `curl`'d every
+  endpoint directly, then drove both real GUI clients (Vite dev server;
+  headless-offscreen Qt with a real running event loop) against that same
+  live backend and screenshotted all 4 Reports tabs plus Master Entry in
+  both clients to confirm real data actually renders, not just that
+  requests succeed.
+- **Result:** 184/184 Python tests passing (backend: 34 new; qt-app: 12,
+  9 new) + web-frontend typecheck/build clean. Fixed one incidental test
+  basename collision (`qt-app/tests/test_reports.py` vs. the pre-existing
+  unrelated `analysis-engine/tests/test_reports.py`, colliding under a
+  joint pytest invocation with no per-package `__init__.py`) by renaming
+  to `test_reports_screen.py`.
+
 ## 2026-07-29 16:19 UTC — Phase E: Table Config (which STEP/PARAMETER rows show, and in what order)
 
 Resolved via real client screenshots of the LabVIEW `Table Config.vi`
@@ -265,8 +334,12 @@ GUI in M1):
   matching the real system's report shape.
 - **Phase E** (done): Table Config — which gear+direction/parameter rows
   show in a report, and in what order.
-- **A–E complete.** Next: **M1** — FastAPI backend + web/Qt Report GUI,
-  built against the now-reconciled domain shapes. (A GUI *scaffold* — app
-  shell + placeholder screens, no live data wiring — already exists in
-  `web-frontend/`/`qt-app/`, built ahead of M1 to have the visual shell
-  ready; see their own READMEs.)
+- **A–E complete.**
+- **M1, first slice (done):** FastAPI backend (`web-backend`/
+  `nvh_web_backend`) + Master Entry/Reports wired to it in both
+  `web-frontend` and `qt-app`.
+- **M1, remaining:** Live Display's live stream (needs a real-time signal
+  source — nothing produces one yet, deliberately deferred); write/edit
+  endpoints (today's backend is read-only — creating/editing models,
+  master profiles, limit configs, Table Configs from the GUI is a later
+  slice); the AI layer; real LabVIEW hardware integration.

@@ -1,3 +1,4 @@
+from nvh_api_schemas.catalog import ParameterCatalogRowOut
 from nvh_api_schemas.management import FailReasonRollup, PassRateRollup
 from nvh_api_schemas.realtime import LiveDcUpdate, LiveTestRunUpdate
 from nvh_api_schemas.report import (
@@ -53,4 +54,5 @@ __all__ = [
     "SummaryReportOut",
     "SummaryRowOut",
     "XChartOut",
+    "ParameterCatalogRowOut",
 ]
