@@ -16,9 +16,14 @@ for the shared visual design system.
   report-assembly layer, shared API wire schemas, and a demo-data seed script
   that persists Parquet files + DB rows per the data contract — the first
   thing in the repo to actually write that data.
-- **Not yet built**: the FastAPI backend (M1), the React web frontend (M2),
-  the PySide6 Qt desktop app (M3), the AI layer, and real LabVIEW hardware
-  integration.
+- **GUI scaffolding: done.** `web-frontend/` (Vite+React+TS+Tailwind) and
+  `qt-app/` (PySide6) app shells, sharing one visual language derived from
+  `design-tokens`. Every screen is a placeholder marked `TODO:` — **no live
+  data wiring yet**; that follows once Phase C–E and the FastAPI backend
+  land.
+- **Not yet built**: the FastAPI backend (M1), wiring the web frontend (M2)
+  and Qt desktop app (M3) to real data, the AI layer, and real LabVIEW
+  hardware integration.
 
 ## Packages
 
@@ -30,6 +35,8 @@ for the shared visual design system.
 | `analysis-engine` | Order-matrix computation, spectral/order analysis, grading, fault detection, SPC, and report assembly (Consolidated/Detailed/Summary) |
 | `simulator` | Synthetic gearbox NVH signal generator conforming to the data contract, with injectable faults for testing |
 | `web-backend/scripts/seed_demo_data.py` | Seeds a demo dataset (Parquet + DB rows) — precedes the FastAPI app itself, which is a later milestone |
+| `web-frontend` | Vite+React+TS+Tailwind Report GUI web client — app shell + Live Display/Master Entry/Reports screens, GUI scaffolding only (see its own README) |
+| `qt-app` | PySide6 Report GUI desktop client — same screens, same design tokens, GUI scaffolding only (see its own README) |
 
 ## Setup
 

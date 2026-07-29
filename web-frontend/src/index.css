@@ -1,0 +1,92 @@
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-dark-background text-dark-secondaryText antialiased;
+  }
+}
+
+@layer components {
+  /* Oscilloscope-graticule grid for plot/live-display areas, per
+     docs/design-tokens.md, in place of a generic dashboard card look: a
+     60px major division grid at full opacity, layered with a 12px minor
+     grid at the graticule-minor opacity token, matching a real
+     spectrum-analyzer graticule. */
+  .graticule-bg {
+    background-color: theme("colors.dark.background");
+    background-image:
+      linear-gradient(to right, theme("colors.graticule") theme("borderWidth.graticule"), transparent 1px),
+      linear-gradient(to bottom, theme("colors.graticule") theme("borderWidth.graticule"), transparent 1px);
+    background-size: 60px 60px;
+    position: relative;
+  }
+
+  .graticule-bg::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, theme("colors.graticule") theme("borderWidth.graticule"), transparent 1px),
+      linear-gradient(to bottom, theme("colors.graticule") theme("borderWidth.graticule"), transparent 1px);
+    background-size: 12px 12px;
+    opacity: theme("opacity.graticule-minor");
+  }
+}
+
+.gear-glyph svg {
+  height: 1em;
+  width: auto;
+  overflow: visible;
+}
+
+/* Watermark usage (e.g. the PASS/FAIL stamp outline): fill the wrapper
+   instead of sizing to text, per docs/design-tokens.md's "outline the
+   PASS/FAIL stamp is cut into". */
+.gear-glyph--fill svg {
+  height: 100%;
+  width: 100%;
+}
+
+.gear-glyph--spinning svg #gear-left {
+  transform-origin: 42px 50px;
+  animation: spin-cw 6s linear infinite;
+}
+
+.gear-glyph--spinning svg #gear-right {
+  transform-origin: 98px 50px;
+  animation: spin-ccw 4.5s linear infinite;
+}
+
+@keyframes spin-cw {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes spin-ccw {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
