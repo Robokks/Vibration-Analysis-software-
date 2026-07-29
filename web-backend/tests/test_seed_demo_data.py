@@ -54,7 +54,10 @@ def test_seed_populates_all_contract_tables(seeded):
     with engine.connect() as conn:
         counts = {
             table: conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
-            for table in ("models", "test_runs", "dc_records", "master_signatures", "grading_results", "spc_points")
+            for table in (
+                "models", "test_runs", "dc_records", "master_signatures", "grading_results", "spc_points",
+                "master_profiles", "limit_configs",
+            )
         }
 
     # GEAR_R (in seed_demo_data.py) has no fdr_teeth/fd_sel, so the CM_H*
@@ -68,6 +71,36 @@ def test_seed_populates_all_contract_tables(seeded):
     assert counts["master_signatures"] == summary["n_master_params"]
     assert counts["grading_results"] == summary["n_master_params"] * len(summary["runs"])
     assert counts["spc_points"] == summary["n_master_params"] * len(summary["runs"])
+    # Phase C: one named profile ("REVA") importing the master band into a
+    # limit-config row per parameter -- persisted, but not fed into the
+    # existing 3 demo scenarios' own grading (they still grade via `masters`).
+    assert counts["master_profiles"] == 1
+    assert counts["limit_configs"] == summary["n_limit_config_rows"]
+
+
+def test_seed_limit_config_rows_import_the_master_band(seeded):
+    _, db_url, summary = seeded
+    engine = make_engine(db_url)
+    session_factory = make_session_factory(engine)
+
+    with session_factory() as session:
+        from nvh_contract.db import LimitConfigRow, MasterProfileRow, MasterSignatureRow
+
+        profile = session.get(MasterProfileRow, ("MODEL-A", "REVA"))
+        assert profile is not None
+
+        rms_master = session.query(MasterSignatureRow).filter_by(stat_name="RMS Avg").one()
+        rms_limit = session.get(LimitConfigRow, ("MODEL-A", "REVA", "R", "RU", "vib_a", "RMS Avg"))
+
+        assert rms_limit is not None
+        assert rms_limit.limit_low == pytest.approx(rms_master.band_min)
+        assert rms_limit.limit_high == pytest.approx(rms_master.band_max)
+        assert rms_limit.threshold_low == 0.0
+        assert rms_limit.threshold_high == 0.0
+
+        in_h1_limit = session.get(LimitConfigRow, ("MODEL-A", "REVA", "R", "RU", "vib_a", "IN_H1(g)"))
+        assert in_h1_limit is not None
+        assert in_h1_limit.order_number is not None  # harmonic param carries its resolved order
 
 
 def test_seed_scenarios_produce_expected_results(seeded):

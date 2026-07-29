@@ -13,6 +13,7 @@ import numpy as np
 from analysis_engine.faults.crash_noise import CrashNoiseCheckResult, detect_crash_noise
 from analysis_engine.faults.slippage import SlippageCheckResult, detect_slippage
 from analysis_engine.grading.envelope_check import DcGradingSummary, grade_dc_record
+from analysis_engine.grading.limit_config import LimitConfigValue, grade_dc_record_with_limits
 from analysis_engine.grading.master_builder import MasterSignatureStats, build_master_signature
 from analysis_engine.grading.parameters import compute_parameter_catalog
 from analysis_engine.ordermatrix.gear_math import GearOrders
@@ -52,6 +53,7 @@ def analyze_dc_record(
     slippage_drop_ratio: float = 0.5,
     slippage_min_fraction: float = 0.1,
     n_windows: int = DEFAULT_N_WINDOWS,
+    limit_configs: dict[str, LimitConfigValue] | None = None,
 ) -> DcAnalysisResult:
     order_spec = compute_order_spectrum(signal, time_s, rpm, samples_per_rev=360)
     tracking = compute_order_tracking(signal, time_s, rpm, sample_rate_hz, gear_orders.mesh_order)
@@ -64,7 +66,12 @@ def analyze_dc_record(
     baseline_magnitude = float(np.median(tracking.magnitude)) or 1e-9
     slip = detect_slippage(tracking.magnitude, baseline_magnitude, slippage_drop_ratio, slippage_min_fraction)
 
-    grading = grade_dc_record(parameters, masters) if masters else None
+    if limit_configs:
+        grading = grade_dc_record_with_limits(parameters, limit_configs)
+    elif masters:
+        grading = grade_dc_record(parameters, masters)
+    else:
+        grading = None
 
     fail_reasons = []
     if crash.detected:

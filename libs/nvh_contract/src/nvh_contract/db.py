@@ -120,6 +120,31 @@ class SpcPointRow(Base):
     recorded_at = Column(String, nullable=False)
 
 
+class MasterProfileRow(Base):
+    __tablename__ = "master_profiles"
+
+    model_id = Column(String, ForeignKey("models.model_id"), primary_key=True)
+    program_name = Column(String, primary_key=True)
+    created_at = Column(String, nullable=False)
+
+
+class LimitConfigRow(Base):
+    __tablename__ = "limit_configs"
+
+    model_id = Column(String, ForeignKey("models.model_id"), primary_key=True)
+    program_name = Column(String, primary_key=True)
+    gear_label = Column(String, primary_key=True)
+    direction = Column(String, primary_key=True)
+    channel_name = Column(String, primary_key=True)
+    stat_name = Column(String, primary_key=True)
+    order_number = Column(Float, nullable=True)
+    limit_low = Column(Float, nullable=False)
+    limit_high = Column(Float, nullable=False)
+    threshold_low = Column(Float, nullable=False, default=0.0)
+    threshold_high = Column(Float, nullable=False, default=0.0)
+    updated_at = Column(String, nullable=False)
+
+
 def make_engine(db_url: str):
     return create_engine(db_url)
 

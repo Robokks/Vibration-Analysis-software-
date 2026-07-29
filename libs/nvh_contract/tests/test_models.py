@@ -1,4 +1,6 @@
-from nvh_contract import CONTRACT_VERSION, DcRecord, Direction, Model, OverallResult
+from datetime import datetime
+
+from nvh_contract import CONTRACT_VERSION, DcRecord, Direction, LimitConfigEntry, MasterProfile, Model, OverallResult
 
 
 def test_contract_version_is_set():
@@ -83,6 +85,38 @@ def test_direction_round_trips_all_four_values_through_json():
         )
         restored = DcRecord.model_validate_json(dc.model_dump_json())
         assert restored.direction == direction
+
+
+def test_master_profile_roundtrip_through_json():
+    profile = MasterProfile(model_id="MODEL-A", program_name="REVA", created_at=datetime(2026, 1, 1))
+    restored = MasterProfile.model_validate_json(profile.model_dump_json())
+    assert restored.program_name == "REVA"
+    assert restored.model_id == "MODEL-A"
+
+
+def test_limit_config_entry_order_number_defaults_to_none():
+    entry = LimitConfigEntry(
+        model_id="MODEL-A", program_name="REVA", gear_label="R", direction=Direction.RU,
+        stat_name="RMS Avg", limit_low=0.9, limit_high=1.1, updated_at=datetime(2026, 1, 1),
+    )
+    assert entry.order_number is None
+    assert entry.channel_name == "vib_a"
+    assert entry.threshold_low == 0.0
+    assert entry.threshold_high == 0.0
+
+
+def test_limit_config_entry_roundtrip_when_fully_supplied():
+    entry = LimitConfigEntry(
+        model_id="MODEL-A", program_name="REVA", gear_label="R", direction=Direction.RU,
+        channel_name="mic", stat_name="IN_H1(g)", order_number=12.0,
+        limit_low=0.9, limit_high=1.1, threshold_low=0.05, threshold_high=0.1,
+        updated_at=datetime(2026, 1, 1),
+    )
+    restored = LimitConfigEntry.model_validate_json(entry.model_dump_json())
+    assert restored.channel_name == "mic"
+    assert restored.order_number == 12.0
+    assert restored.threshold_low == 0.05
+    assert restored.threshold_high == 0.1
 
 
 def test_reverse_with_styc_is_representable_but_not_enforced():

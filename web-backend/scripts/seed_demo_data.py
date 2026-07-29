@@ -21,13 +21,16 @@ from pathlib import Path
 
 import numpy as np
 
-from analysis_engine.grading.parameters import default_full_scale_by_param
+from analysis_engine.grading.limit_config import import_limit_config_from_masters
+from analysis_engine.grading.parameters import PARAMETER_CATALOG, default_full_scale_by_param
 from analysis_engine.ordermatrix.gear_math import GearTeeth, compute_gear_orders
 from analysis_engine.pipeline import analyze_dc_record, build_masters_from_trials, compute_trial_parameters
 from nvh_contract import CONTRACT_VERSION
 from nvh_contract.db import (
     DcRecordRow,
     GradingResultRow,
+    LimitConfigRow,
+    MasterProfileRow,
     MasterSignatureRow,
     ModelRow,
     SpcPointRow,
@@ -48,6 +51,7 @@ RPM_START, RPM_END = 1000.0, 2500.0
 DURATION_S = 4.0
 PLANT_ID, LINE_ID, STATION_ID = "PLANT1", "LINE1", "STATION-1"
 CHANNEL_NAME = "vib_a"
+PROGRAM_NAME = "REVA"
 FULL_SCALE_BY_PARAM = default_full_scale_by_param()
 
 GEAR_R = compute_gear_orders(GEAR_LABEL, GearTeeth(drive_shaft=12, idler_shaft_1=36, layshaft=32), gear_ratio=3.753)
@@ -116,6 +120,30 @@ def seed(data_root: Path, db_url: str, n_trials: int, seed_value: int) -> dict:
                     full_scale=master.full_scale,
                     trial_count=master.trial_count,
                     created_at=created_at,
+                )
+            )
+        session.commit()
+
+        # Phase C: a named NVH-PROGRAM ("REVA") that imports the auto-computed
+        # LIMIT band from the masters just built above, with THRESHOLD margins
+        # defaulted to 0.0 pending manual tuning (mirrors the real system's
+        # "Import From MASTER" button). This only persists profile/limit-config
+        # data -- the 3 demo scenarios below keep grading against `masters`
+        # exactly as before, unaffected by this new data.
+        session.merge(
+            MasterProfileRow(model_id=MODEL_ID, program_name=PROGRAM_NAME, created_at=created_at)
+        )
+        limit_config_values = import_limit_config_from_masters(masters)
+        for stat_name, entry in limit_config_values.items():
+            spec = PARAMETER_CATALOG[stat_name]
+            order_number = spec.order_fn(GEAR_R) if spec.kind == "harmonic" else None
+            session.merge(
+                LimitConfigRow(
+                    model_id=MODEL_ID, program_name=PROGRAM_NAME, gear_label=GEAR_LABEL,
+                    direction=DIRECTION, channel_name=CHANNEL_NAME, stat_name=stat_name,
+                    order_number=order_number, limit_low=entry.limit_low, limit_high=entry.limit_high,
+                    threshold_low=entry.threshold_low, threshold_high=entry.threshold_high,
+                    updated_at=created_at,
                 )
             )
         session.commit()
@@ -195,6 +223,7 @@ def seed(data_root: Path, db_url: str, n_trials: int, seed_value: int) -> dict:
             "n_trials": n_trials,
             "runs": seeded_runs,
             "n_master_params": len(masters),
+            "n_limit_config_rows": len(limit_config_values),
         }
 
 

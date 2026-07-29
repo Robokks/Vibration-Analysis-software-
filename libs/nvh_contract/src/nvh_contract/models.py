@@ -114,3 +114,24 @@ class SpcPoint(BaseModel):
     stat_name: str
     value: float
     recorded_at: datetime
+
+
+class MasterProfile(BaseModel):
+    model_id: str
+    program_name: str  # e.g. "REVA" -- the real system's "NVH-PROGRAM"
+    created_at: datetime
+
+
+class LimitConfigEntry(BaseModel):
+    model_id: str
+    program_name: str
+    gear_label: str
+    direction: Direction
+    channel_name: str = "vib_a"
+    stat_name: str
+    order_number: float | None = None
+    limit_low: float
+    limit_high: float
+    threshold_low: float = 0.0
+    threshold_high: float = 0.0
+    updated_at: datetime

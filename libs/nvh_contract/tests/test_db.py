@@ -1,6 +1,17 @@
 import json
 
-from nvh_contract.db import ModelRow, TestRunRow, init_db, make_engine, make_session_factory
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from nvh_contract.db import (
+    LimitConfigRow,
+    MasterProfileRow,
+    ModelRow,
+    TestRunRow,
+    init_db,
+    make_engine,
+    make_session_factory,
+)
 
 
 def test_init_db_and_roundtrip_row(tmp_path):
@@ -93,3 +104,79 @@ def test_model_row_new_columns_roundtrip_when_supplied(tmp_path):
         assert json.loads(model.drive_shaft_bearing_roll_json)["R"] == 5.43
         assert json.loads(model.fdr_teeth_json)["FDR1"] == 27
         assert json.loads(model.fd_sel_json)["R"] == "FDR1"
+
+
+def _seed_model(session, model_id: str) -> None:
+    session.add(
+        ModelRow(
+            model_id=model_id, model_name="Nano 4 Speed", drive_teeth_json="{}",
+            idler_teeth_1_json="{}", layshaft_teeth_json="{}", ratios_json="{}",
+        )
+    )
+    session.commit()
+
+
+def test_master_profile_row_roundtrip(tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path}/test.db")
+    init_db(engine)
+    Session = make_session_factory(engine)
+
+    with Session() as session:
+        _seed_model(session, "MODEL-A")
+        session.add(MasterProfileRow(model_id="MODEL-A", program_name="REVA", created_at="2026-07-29T00:00:00"))
+        session.commit()
+
+    with Session() as session:
+        profile = session.get(MasterProfileRow, ("MODEL-A", "REVA"))
+        assert profile is not None
+        assert profile.created_at == "2026-07-29T00:00:00"
+
+
+def test_limit_config_row_roundtrip(tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path}/test.db")
+    init_db(engine)
+    Session = make_session_factory(engine)
+
+    with Session() as session:
+        _seed_model(session, "MODEL-A")
+        session.add(
+            LimitConfigRow(
+                model_id="MODEL-A", program_name="REVA", gear_label="R", direction="RU",
+                channel_name="vib_a", stat_name="RMS Avg", order_number=None,
+                limit_low=0.9, limit_high=1.1, threshold_low=0.05, threshold_high=0.1,
+                updated_at="2026-07-29T00:00:00",
+            )
+        )
+        session.commit()
+
+    with Session() as session:
+        row = session.get(LimitConfigRow, ("MODEL-A", "REVA", "R", "RU", "vib_a", "RMS Avg"))
+        assert row is not None
+        assert row.limit_low == 0.9
+        assert row.threshold_high == 0.1
+
+
+def test_limit_config_row_duplicate_key_conflicts(tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path}/test.db")
+    init_db(engine)
+    Session = make_session_factory(engine)
+
+    with Session() as session:
+        _seed_model(session, "MODEL-A")
+        session.commit()
+
+    def _row():
+        return LimitConfigRow(
+            model_id="MODEL-A", program_name="REVA", gear_label="R", direction="RU",
+            channel_name="vib_a", stat_name="RMS Avg", limit_low=0.9, limit_high=1.1,
+            updated_at="2026-07-29T00:00:00",
+        )
+
+    with Session() as session:
+        session.add(_row())
+        session.commit()
+
+    with Session() as session:
+        session.add(_row())
+        with pytest.raises(IntegrityError):
+            session.commit()

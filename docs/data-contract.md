@@ -125,6 +125,33 @@ CREATE TABLE spc_points (
     value            REAL NOT NULL,
     recorded_at      TEXT NOT NULL
 );
+
+-- Phase C: named master profiles (the real system's "NVH-PROGRAM", e.g. "REVA")
+CREATE TABLE master_profiles (
+    model_id         TEXT NOT NULL REFERENCES models(model_id),
+    program_name     TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    PRIMARY KEY (model_id, program_name)
+);
+
+-- Phase C: two-stage LIMIT (auto, imported from master_signatures) / THRESHOLD
+-- (manually tuned margin) config, matching the real Limit Config.vi screen's
+-- STEP | CHANNEL | PARAMETER | ORDERS | LIMIT (LOW/HIGH) | THRESHOLD (LOW/HIGH).
+CREATE TABLE limit_configs (
+    model_id         TEXT NOT NULL REFERENCES models(model_id),
+    program_name     TEXT NOT NULL,
+    gear_label       TEXT NOT NULL,          -- STEP = gear_label + direction
+    direction        TEXT NOT NULL,
+    channel_name     TEXT NOT NULL,          -- CHANNEL; defaults to "vib_a" -- see multi-channel note below
+    stat_name        TEXT NOT NULL,          -- PARAMETER; see analysis_engine.grading.parameters.PARAMETER_CATALOG
+    order_number     REAL,                   -- ORDERS; the resolved harmonic order, NULL for non-harmonic params
+    limit_low        REAL NOT NULL,
+    limit_high       REAL NOT NULL,
+    threshold_low    REAL NOT NULL DEFAULT 0.0,
+    threshold_high   REAL NOT NULL DEFAULT 0.0,
+    updated_at       TEXT NOT NULL,
+    PRIMARY KEY (model_id, program_name, gear_label, direction, channel_name, stat_name)
+);
 ```
 
 ## Grading formula (G1–G10 ladder)
@@ -215,6 +242,57 @@ conflate them:
   was replaced by `DcAnalysisResultOut.parameters: dict[str, float]` (a
   breaking shape change) — but that change has nothing to do with the
   Parquet/DB contract, so it does not bump `CONTRACT_VERSION`.
+
+## Phase C: Master Profiles & Two-Stage Limits
+
+Source of truth: the real system's `Limit Config.vi` screen (`STEP |
+CHANNEL | PARAMETER | ORDERS | LIMIT (LOW) | THRESHOLD (LOW) | LIMIT (HIGH)
+| THRESHOLD (HIGH)`, with "Save" and "Import From MASTER" actions) and its
+`MASTER SETUP` screen (`MODEL NAME` + `NVH-PROGRAM` dropdowns, e.g.
+"e2o-48V" + "REVA").
+
+**Scoping.** Master signatures (`master_signatures`, Phase A/B, unchanged)
+stay a single auto-computed band per model — building masters from trial
+data is exactly as it was before this phase. A named profile
+(`master_profiles.program_name`, the "NVH-PROGRAM") covers *all*
+gears/directions for a model; the `limit_configs` table's
+`gear_label`+`direction` (STEP) and `channel_name`/`stat_name`
+(CHANNEL/PARAMETER) disambiguate rows within one profile. Multiple
+programs for the same model each independently "Import From MASTER" the
+same band (`import_limit_config_from_masters()` in
+`analysis_engine.grading.limit_config`), then diverge only in their
+manually-tuned `threshold_low`/`threshold_high` margins.
+
+**LIMIT/THRESHOLD formula.** `LIMIT_LOW`/`LIMIT_HIGH` are a straight copy
+of the master's `band_min`/`band_max` (the "Import From MASTER" step).
+`THRESHOLD_LOW`/`THRESHOLD_HIGH` are manually-tunable margins, defaulted to
+`0.0` on import. A value passes iff:
+```
+effective_low  = limit_low  - threshold_low
+effective_high = limit_high + threshold_high
+ok = effective_low <= value <= effective_high
+```
+This is a genuinely new, parallel pass/fail path
+(`check_value_with_threshold()`/`grade_dc_record_with_limits()` in
+`analysis_engine.grading.limit_config`) — it does not replace or modify
+`envelope_check.check_value()`/`grade_dc_record()`'s existing G4-G6-window
+behavior, which stays exactly as it was in Phase A/B. The G1-G10 ladder
+(`g_level`) is still computed from the LIMIT band for informational/
+diagnostic display; it is not the pass/fail source once a limit config is
+supplied to `pipeline.analyze_dc_record(..., limit_configs=...)`.
+
+**Multi-channel simplification (documented).** `channel_name` exists on
+`limit_configs` to match the real screen, but the analysis pipeline
+(`analyze_dc_record`) only ever grades one channel per call — there is no
+multi-channel orchestration anywhere yet. It defaults to `"vib_a"`
+everywhere for now; real multi-channel grading is a separate, later
+concern.
+
+A real exported grading-result sheet (a flat per-unit report, the target
+shape for Phase D, not built yet) confirms this formula in practice: a row
+like `IN_H1 | order=13 | LOW=26 | ACTUAL=35.369 | HIGH=35 -> NOK` shows
+`LOW`/`HIGH` as already-combined effective bounds, exactly as derived
+above, compared directly against the observed value.
 
 ## Versioning
 
