@@ -405,6 +405,119 @@ Phase D entry, since Phase D directly builds on Phase C and continuity
 mattered more than leaving the gap — flagged clearly in the entry itself
 as written retroactively, not implying it happened in this session.
 
+### Turn — Phase E: table config
+**User:** "start planning Phase E"
+
+**Assistant:** Entered plan mode. Searched CONVERSATION_LOG.md, PROGRESS.md,
+docs/data-contract.md, the GUI scaffold's own TODO banners, and the full
+git log for any concrete spec behind Phase E's one-line description
+("table/report configuration model — which columns/parameters show
+where") — found genuinely nothing beyond that single recurring sentence
+anywhere, confirmed via an Explore sub-agent's exhaustive sweep. Rather
+than guess at a generic config model (which would contradict this
+project's whole methodology of reconciling against real screens), asked
+the user via `AskUserQuestion`: whether they had a real screenshot (like
+Phase B's parameter list), and if not, what the config should concretely
+control and whether it should be a persisted domain concept or GUI-only.
+
+**User:** Answered "I'll share it now" to the screenshot question.
+
+**Assistant:** Asked the user to go ahead and share it.
+
+**User:** Shared 11 screenshots from the real LabVIEW system.
+
+**Assistant:** Read all 11 directly. Two were the real Phase E spec: a
+`Table Config.vi` window with a "GEAR & NVH" tab (a listbox headed `S.NO |
+PARAMETER NAMES` that — despite the header — actually lists gear+direction
+combos like `R_RU, R_STYD, R_RD, I_RU, I_STYD, I_STYC, ...`, confirming
+Reverse's existing no-`STYC` convention, with `S.NO` as an
+operator-assigned step position) and a "PARAMETER CONFIG" tab (same
+window, a genuine checkbox list of the 49 catalog parameters plus
+`Speed`/`Time`). The rest were either already-built Phase A/C screens
+(`GEARS`/`PARAMETERS`, `MASTER SETUP`) confirming existing work matched
+reality, or a family of clearly out-of-scope "system configuration"
+screens (user permission levels, work-order/database/security settings) —
+noted explicitly so they wouldn't get conflated with Phase E. Recognized
+this directly resolved the earlier ambiguity in favor of "a row-level
+inclusion+ordering filter over Phase D's flat report," not a column-
+visibility system for the 4 report types (one of the hypotheses offered
+in the earlier clarifying question).
+
+Launched a Plan sub-agent with the full design (grounded in the
+screenshots plus the actual codebase) to validate against the real code,
+same workflow as Phase D. It confirmed the core design and caught one
+real bug — my draft's proposed sort key `(step, parameter)` sorts
+parameters alphabetically, which nothing in the real screen supports;
+`PARAMETER_CATALOG`'s own insertion order (base stats, then unit-family,
+then harmonics) is the only ordering ever established, so the fix was to
+sort by catalog rank instead. It also corrected a scoping assumption (no
+new `nvh_contract` test files — `test_models.py`/`test_db.py` are
+cross-cutting single files per package, confirmed by reading their actual
+structure), confirmed via grep that Phase C added zero `nvh_api_schemas`
+changes for its own new persisted tables (settling the "should Phase E add
+wire schemas" question), and confirmed — by reading Phase C's actual
+`seed_demo_data.py` diff rather than assuming — that Phase E should seed
+its new tables despite Phase D having deliberately left the seed script
+alone (the two phases differ: Phase C/E add new *persisted config*, Phase
+D added only an in-memory *report*). Verified several of these claims
+directly (grepped `nvh_api_schemas` for `MasterProfile`/`LimitConfig`
+references, confirmed `PARAMETER_CATALOG`'s insertion order by hand, read
+the exact `test_models.py`/`test_db.py`/`seed_demo_data.py` structures)
+before finalizing.
+
+Wrote the final plan to `/root/.claude/plans/modular-coalescing-adleman.md`
+(overwriting Phase D's completed plan, same as Phase B overwrote Phase
+A's): new `TableConfigStepEntry`/`TableConfigParameterEntry` pydantic
+models + `TableConfigStepRow`/`TableConfigParameterRow` ORM rows in
+`nvh_contract`, mirroring `LimitConfigEntry`/`LimitConfigRow` exactly (row
+presence = included, no boolean flag); a new
+`analysis_engine.reports.table_config` module with a pure post-processing
+`apply_table_config()` over Phase D's `CodeResultReport` output
+(`code_result.py` itself untouched); a `NON_GRADED_CONTEXT_COLUMNS =
+("Speed", "Time")` constant in `parameters.py`, documented as currently
+inert since no report builder produces a Speed/Time row to filter; a
+`seed_demo_data.py` update persisting a demo Table Config via
+`session.merge()` (required, not stylistic, given the existing rerun
+test); new/extended tests following each package's established
+conventions; and a new `docs/data-contract.md` Phase E section.
+
+**User:** approved the plan (via the ExitPlanMode tool's approval flow).
+
+### Turn — Phase E implementation
+**Assistant:** Implemented the approved plan file-by-file: added
+`TableConfigStepEntry`/`TableConfigParameterEntry` to `nvh_contract/
+models.py`, `TableConfigStepRow`/`TableConfigParameterRow` to `db.py`,
+exported both pydantic models from `__init__.py`, and added the two
+`CREATE TABLE` statements to `docs/data-contract.md`'s schema block; added
+`NON_GRADED_CONTEXT_COLUMNS` to `parameters.py`; created `analysis_engine/
+reports/table_config.py` (`TableConfigStep`, `TableConfig`,
+`apply_table_config()`) and exported it from `reports/__init__.py`; wired
+`seed_demo_data.py` to persist one `TableConfigStepRow` and one
+`TableConfigParameterRow` per currently-graded parameter via
+`session.merge()`, and added `n_table_config_parameter_rows` to the
+returned summary dict; wrote new roundtrip tests in the existing
+`test_models.py`/`test_db.py` (including a `merge()`-based upsert-in-place
+regression test — the first unit-level test of the exact idempotency
+property both Phase C and Phase E now depend on), a new
+`test_table_config.py` (filtering, step-overwrite, catalog-rank sort
+order with an explicit alphabetical-vs-insertion-order counterexample,
+never-invents-a-row, channel-mismatch-raises, empty-config), and extended
+`test_seed_populates_all_contract_tables` with the two new table counts;
+wrote the `docs/data-contract.md` Phase E section (screen description,
+row-presence idiom, `step_order`/sort semantics, the Speed/Time inert-gap
+note, and a careful framing correction noting Phase D's `step` was always
+real run-order semantics, not a flagged placeholder). Installed all
+editable packages into a fresh venv and ran the full cross-package suite
+— **146/146 tests passing** (14 new) — then re-ran the CLI demo and, since
+this phase's whole point is a new idempotent persisted table, manually
+ran `seed_demo_data.py` twice against the same DB (not just relying on the
+automated test) and inspected the persisted rows directly via sqlite3,
+confirming exactly 1 step row and 40 parameter rows (49 minus the 9
+always-absent `CM_H*` harmonics for `GEAR_R`, matching the existing
+`limit_configs` count exactly). Updated `PROGRESS.md`'s Phase E entry and
+"What's next" section (Phases A–E now all complete, next up is M1) and
+appended this transcript to `CONVERSATION_LOG.md`.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)

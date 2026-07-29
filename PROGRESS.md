@@ -6,6 +6,67 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-29 16:19 UTC — Phase E: Table Config (which STEP/PARAMETER rows show, and in what order)
+
+Resolved via real client screenshots of the LabVIEW `Table Config.vi`
+screen (previously only a one-line placeholder description in this log),
+which turned out to be one window with two tabs, both scoped per
+`(model_id, program_name, channel_name)` like `limit_configs`:
+
+- **"GEAR & NVH" tab** (a client-side mislabeled `PARAMETER NAMES` column
+  that actually lists gear+direction combos, e.g. `R_RU, R_STYD, R_RD,
+  I_RU, I_STYD, I_STYC, ...` — Reverse correctly has no `STYC` row,
+  matching the already-documented convention) → new
+  `table_config_steps` table / `TableConfigStepEntry`: which
+  gear+direction steps are included, and their `step_order`.
+- **"PARAMETER CONFIG" tab** (a genuine checkbox list of the 49 catalog
+  parameters plus `Speed`/`Time`) → new `table_config_parameters` table /
+  `TableConfigParameterEntry`: which parameters are included. New
+  `analysis_engine.grading.parameters.NON_GRADED_CONTEXT_COLUMNS =
+  ("Speed", "Time")` constant to represent the latter two.
+- Row presence = included, absence = excluded in both — no separate
+  boolean flag, matching `limit_configs`' own idiom.
+- New `analysis_engine.reports.table_config.apply_table_config()`: a pure
+  post-processing filter over Phase D's `build_code_result_report()`
+  output (`code_result.py` itself untouched) — drops rows for
+  unconfigured steps/parameters, overwrites each surviving row's `step`
+  with the *configured* `step_order` (replacing Phase D's caller-list-order
+  placeholder now that a real ordering exists), and sorts by
+  `(step_order, PARAMETER_CATALOG insertion rank)` — explicitly **not**
+  alphabetically, a real bug a Plan sub-agent caught in the draft design
+  before implementation.
+- `seed_demo_data.py` now persists a demo Table Config (the one
+  gear+direction+channel the demo exercises, `step_order=1`, every
+  currently-graded parameter included) via `session.merge()` — required,
+  not stylistic: `test_seed_is_rerunnable_without_error` already reruns
+  `seed()` against the same DB, and `session.add()` would have reproduced
+  the exact historical `LimitConfigRow` idempotency bug Phase C already
+  fixed once. Verified the rerun manually in addition to the test.
+- Explicitly no `nvh_api_schemas` changes (confirmed Phase C set this
+  precedent for its own new persisted tables — zero wire schemas either;
+  `CodeResultReportOut` already covers the filtered report's shape
+  unchanged) and no `code_result.py` changes (Phase E composes with Phase
+  D's output rather than modifying it).
+- Documented, not silently absorbed: `Speed`/`Time` are modeled in the
+  parameter config for 1:1 fidelity with the real screen's checklist, but
+  are currently inert — no report builder in this codebase produces a
+  Speed/Time row to filter yet.
+- Planned via a Plan sub-agent validating the design against real
+  client screenshots and the actual code (same workflow as prior phases)
+  — besides the alphabetical-sort bug, it corrected the test-file
+  convention (no new `nvh_contract` test files — `test_models.py`/
+  `test_db.py` are cross-cutting, single files per package, not
+  per-model), confirmed the `nvh_api_schemas`/`seed_demo_data.py` scoping
+  decisions above by reading the actual Phase C diff rather than assuming
+  precedent, and added a defensive channel-mismatch check to
+  `apply_table_config()`.
+- **Result:** 146/146 tests passing across every package (14 new: 4 in
+  `test_models.py`, 3 in `test_db.py`, 7 in the new
+  `test_table_config.py`, plus extended assertions in
+  `test_seed_populates_all_contract_tables`); CLI demo and
+  `seed_demo_data.py` re-verified end-to-end, including a manual
+  double-run confirming idempotency.
+
 ## 2026-07-29 15:39 UTC — Phase D: Flat CODE-RESULT grading output table
 
 Built the flat, per-row grading output table matching the real system's
@@ -202,10 +263,10 @@ GUI in M1):
   configuration.
 - **Phase D** (done): flat CODE-RESULT-style grading output table,
   matching the real system's report shape.
-- **Phase E** (not started): table/report configuration model (which
-  columns/parameters show where).
-- **M1** (after A–E): FastAPI backend + web/Qt Report GUI, built against
-  the now-reconciled domain shapes. (A GUI *scaffold* — app shell +
-  placeholder screens, no live data wiring — already exists in
+- **Phase E** (done): Table Config — which gear+direction/parameter rows
+  show in a report, and in what order.
+- **A–E complete.** Next: **M1** — FastAPI backend + web/Qt Report GUI,
+  built against the now-reconciled domain shapes. (A GUI *scaffold* — app
+  shell + placeholder screens, no live data wiring — already exists in
   `web-frontend/`/`qt-app/`, built ahead of M1 to have the visual shell
   ready; see their own READMEs.)

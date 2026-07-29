@@ -145,6 +145,28 @@ class LimitConfigRow(Base):
     updated_at = Column(String, nullable=False)
 
 
+class TableConfigStepRow(Base):
+    __tablename__ = "table_config_steps"
+
+    model_id = Column(String, ForeignKey("models.model_id"), primary_key=True)
+    program_name = Column(String, primary_key=True)
+    gear_label = Column(String, primary_key=True)
+    direction = Column(String, primary_key=True)
+    channel_name = Column(String, primary_key=True)
+    step_order = Column(Integer, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+
+class TableConfigParameterRow(Base):
+    __tablename__ = "table_config_parameters"
+
+    model_id = Column(String, ForeignKey("models.model_id"), primary_key=True)
+    program_name = Column(String, primary_key=True)
+    channel_name = Column(String, primary_key=True)
+    stat_name = Column(String, primary_key=True)
+    updated_at = Column(String, nullable=False)
+
+
 def make_engine(db_url: str):
     return create_engine(db_url)
 

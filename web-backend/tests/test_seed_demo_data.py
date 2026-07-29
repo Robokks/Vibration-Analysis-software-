@@ -56,7 +56,7 @@ def test_seed_populates_all_contract_tables(seeded):
             table: conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
             for table in (
                 "models", "test_runs", "dc_records", "master_signatures", "grading_results", "spc_points",
-                "master_profiles", "limit_configs",
+                "master_profiles", "limit_configs", "table_config_steps", "table_config_parameters",
             )
         }
 
@@ -76,6 +76,10 @@ def test_seed_populates_all_contract_tables(seeded):
     # existing 3 demo scenarios' own grading (they still grade via `masters`).
     assert counts["master_profiles"] == 1
     assert counts["limit_configs"] == summary["n_limit_config_rows"]
+    # Phase E: one demo Table Config -- one gear+direction+channel step, and
+    # one parameter-inclusion row per currently-graded parameter.
+    assert counts["table_config_steps"] == 1
+    assert counts["table_config_parameters"] == summary["n_table_config_parameter_rows"]
 
 
 def test_seed_limit_config_rows_import_the_master_band(seeded):

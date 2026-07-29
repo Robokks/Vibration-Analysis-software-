@@ -10,6 +10,8 @@ from nvh_contract.models import (
     Model,
     OverallResult,
     SpcPoint,
+    TableConfigParameterEntry,
+    TableConfigStepEntry,
     TestRun,
 )
 
@@ -28,5 +30,7 @@ __all__ = [
     "Model",
     "OverallResult",
     "SpcPoint",
+    "TableConfigParameterEntry",
+    "TableConfigStepEntry",
     "TestRun",
 ]

@@ -135,3 +135,32 @@ class LimitConfigEntry(BaseModel):
     threshold_low: float = 0.0
     threshold_high: float = 0.0
     updated_at: datetime
+
+
+class TableConfigStepEntry(BaseModel):
+    """Phase E: the real system's Table Config.vi "GEAR & NVH" tab -- which
+    gear+direction combos are included in a table/report, and in what
+    order. Row presence = included (see TableConfigParameterEntry)."""
+
+    model_id: str
+    program_name: str
+    gear_label: str
+    direction: Direction
+    channel_name: str = "vib_a"
+    step_order: int = Field(ge=1)
+    updated_at: datetime
+
+
+class TableConfigParameterEntry(BaseModel):
+    """Phase E: the real system's Table Config.vi "PARAMETER CONFIG" tab --
+    which parameters are included in a table/report. `stat_name` is a bare
+    str (not validated against PARAMETER_CATALOG) for the same reason
+    LimitConfigEntry.stat_name is -- nvh_contract has no dependency on
+    analysis-engine. It may also be "Speed"/"Time" (the non-graded rpm/
+    time_s context columns the real screen's checklist also includes)."""
+
+    model_id: str
+    program_name: str
+    channel_name: str = "vib_a"
+    stat_name: str
+    updated_at: datetime

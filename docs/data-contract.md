@@ -152,6 +152,31 @@ CREATE TABLE limit_configs (
     updated_at       TEXT NOT NULL,
     PRIMARY KEY (model_id, program_name, gear_label, direction, channel_name, stat_name)
 );
+
+-- Phase E: Table Config, matching the real Table Config.vi screen's two
+-- tabs ("GEAR & NVH" -- which gear+direction combos show and in what
+-- order; "PARAMETER CONFIG" -- which parameters show). Row presence in
+-- either table = included; absence = excluded (no separate boolean flag,
+-- matching limit_configs' own idiom).
+CREATE TABLE table_config_steps (
+    model_id         TEXT NOT NULL REFERENCES models(model_id),
+    program_name     TEXT NOT NULL,
+    gear_label       TEXT NOT NULL,          -- "GEAR & NVH" tab's row identity: gear_label + direction
+    direction        TEXT NOT NULL,
+    channel_name     TEXT NOT NULL,          -- CHAN[NEL] dropdown
+    step_order       INTEGER NOT NULL,       -- S.NO; the resolved STEP (see Phase D's CodeResultRow.step)
+    updated_at       TEXT NOT NULL,
+    PRIMARY KEY (model_id, program_name, gear_label, direction, channel_name)
+);
+
+CREATE TABLE table_config_parameters (
+    model_id         TEXT NOT NULL REFERENCES models(model_id),
+    program_name     TEXT NOT NULL,
+    channel_name     TEXT NOT NULL,
+    stat_name        TEXT NOT NULL,          -- PARAMETER_CATALOG key, or "Speed"/"Time" -- see Phase E notes below
+    updated_at       TEXT NOT NULL,
+    PRIMARY KEY (model_id, program_name, channel_name, stat_name)
+);
 ```
 
 ## Grading formula (G1–G10 ladder)
@@ -387,6 +412,69 @@ report builders, `build_code_result_report` is built from live
 flagged here so a later milestone serving *historical* CODE-RESULT reports
 from stored data knows to add `low`/`high` columns to `grading_results`
 first.
+
+## Phase E: Table Config
+
+Source of truth: the real system's `Table Config.vi` screen, one window
+with two tabs, both scoped per `(model_id, program_name, channel_name)`
+like `limit_configs`:
+
+- **"GEAR & NVH" tab**: a listbox headed `S.NO | PARAMETER NAMES` — despite
+  the header, this column lists gear+direction combos (`R_RU, R_STYD,
+  R_RD, I_RU, I_STYD, I_STYC, I_RD, II_RU, ...`), not catalog parameters;
+  a client-side mislabel, not a modeling decision on this project's part.
+  Reverse (`R`) only has 3 rows (no `STYC`), already consistent with this
+  contract's existing convention (see `Direction`'s docstring and the
+  `dc_records.direction` comment above). `S.NO` is the operator-assigned
+  step position — `table_config_steps.step_order`.
+- **"PARAMETER CONFIG" tab** (same window): a checkbox listbox, genuinely
+  listing parameter names — `PARAMETER_CATALOG` keys plus
+  `analysis_engine.grading.parameters.NON_GRADED_CONTEXT_COLUMNS =
+  ("Speed", "Time")` (the existing non-graded `rpm`/`time_s` context
+  columns). No ordering concept here, unlike the steps tab — just
+  inclusion. `table_config_parameters`.
+
+**Row presence = included; absence = excluded**, in both tables — no
+separate boolean flag, matching this contract's existing dominant idiom
+(`limit_configs`, `grade_dc_record`'s per-stat skip, etc.).
+
+**`apply_table_config()`** (`analysis_engine.reports.table_config`) is a
+pure post-processing filter over Phase D's `build_code_result_report()`
+output — `code_result.py` itself is unmodified. It (1) drops any row whose
+`(gear_direction, channel_name)` has no configured step, (2) drops any row
+whose `parameter` isn't in the configured parameter set, (3) overwrites
+each surviving row's `step` with the *configured* `step_order`, and (4)
+sorts by `(step_order, PARAMETER_CATALOG insertion rank)` — **not
+alphabetically**; nothing in the real screen supports re-alphabetizing,
+and `PARAMETER_CATALOG`'s own insertion order (base stats, then
+unit-family, then harmonics) is the only ordering this contract has ever
+established. To be precise about what changes and what doesn't: Phase D's
+`step` was always documented as real caller-supplied run-order semantics
+(the order `results` were passed to `build_code_result_report()`), not a
+placeholder awaiting this screen — Phase E supplies the missing
+*authoritative*, operator-configured ordering that was simply absent
+before, via `apply_table_config()`, rather than replacing a stand-in.
+
+Like Phase D, `apply_table_config()` can only narrow/reorder what was
+already produced — a parameter selected in `table_config_parameters` but
+never graded (no master/limit-config) still gets no row, since
+`build_code_result_report()` never emitted one for it.
+
+**Documented gap: `Speed`/`Time` are currently inert.** They're modeled in
+`table_config_parameters`/`NON_GRADED_CONTEXT_COLUMNS` for 1:1 schema
+fidelity with the real screen's checklist, but no report builder in this
+codebase (`Consolidated`/`Detailed`/`Summary`/`CodeResult`) ever produces a
+Speed/Time row — `compute_parameter_catalog()` never touches `rpm`/
+`time_s`. Selecting them in a Table Config has no filtering effect today;
+revisit if/when a future report type surfaces per-parameter Speed/Time
+rows.
+
+**No `nvh_api_schemas` changes.** Confirmed Phase C added zero wire
+schemas for its own new persisted tables (`master_profiles`/
+`limit_configs`); Phase E follows the identical precedent for
+`table_config_steps`/`table_config_parameters`. `CodeResultReportOut`
+already covers `apply_table_config()`'s output unchanged, since it's still
+exactly a `CodeResultReport`, just filtered/reordered.
 
 ## Versioning
 

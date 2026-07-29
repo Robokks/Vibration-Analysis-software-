@@ -34,6 +34,8 @@ from nvh_contract.db import (
     MasterSignatureRow,
     ModelRow,
     SpcPointRow,
+    TableConfigParameterRow,
+    TableConfigStepRow,
     TestRunRow,
     init_db,
     make_engine,
@@ -148,6 +150,28 @@ def seed(data_root: Path, db_url: str, n_trials: int, seed_value: int) -> dict:
             )
         session.commit()
 
+        # Phase E: a demo Table Config -- the one gear+direction+channel this
+        # demo already exercises, at step 1, with every currently-graded
+        # parameter included (masters.keys(), not a hardcoded 49: GEAR_R has
+        # no fdr_teeth/fd_sel, so the CM_H* harmonics are always absent, same
+        # as the limit_configs rows above). Persisted like the MasterProfile/
+        # LimitConfig rows above -- not fed into the 3 demo scenarios' own
+        # grading, which is unaffected.
+        session.merge(
+            TableConfigStepRow(
+                model_id=MODEL_ID, program_name=PROGRAM_NAME, gear_label=GEAR_LABEL,
+                direction=DIRECTION, channel_name=CHANNEL_NAME, step_order=1, updated_at=created_at,
+            )
+        )
+        for stat_name in masters:
+            session.merge(
+                TableConfigParameterRow(
+                    model_id=MODEL_ID, program_name=PROGRAM_NAME, channel_name=CHANNEL_NAME,
+                    stat_name=stat_name, updated_at=created_at,
+                )
+            )
+        session.commit()
+
         scenarios = [
             ("healthy-unit", None),
             ("crash-noise-unit", Fault(kind="crash_noise", start_s=2.0, end_s=2.3, amplitude=8.0)),
@@ -224,6 +248,7 @@ def seed(data_root: Path, db_url: str, n_trials: int, seed_value: int) -> dict:
             "runs": seeded_runs,
             "n_master_params": len(masters),
             "n_limit_config_rows": len(limit_config_values),
+            "n_table_config_parameter_rows": len(masters),
         }
 
 

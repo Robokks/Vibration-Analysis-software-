@@ -1,6 +1,19 @@
 from datetime import datetime
 
-from nvh_contract import CONTRACT_VERSION, DcRecord, Direction, LimitConfigEntry, MasterProfile, Model, OverallResult
+import pytest
+from pydantic import ValidationError
+
+from nvh_contract import (
+    CONTRACT_VERSION,
+    DcRecord,
+    Direction,
+    LimitConfigEntry,
+    MasterProfile,
+    Model,
+    OverallResult,
+    TableConfigParameterEntry,
+    TableConfigStepEntry,
+)
 
 
 def test_contract_version_is_set():
@@ -133,3 +146,42 @@ def test_reverse_with_styc_is_representable_but_not_enforced():
         parquet_path="dc.parquet",
     )
     assert dc.direction == Direction.STYC
+
+
+def test_table_config_step_entry_roundtrip():
+    entry = TableConfigStepEntry(
+        model_id="MODEL-A", program_name="REVA", gear_label="R", direction=Direction.RU,
+        channel_name="vib_a", step_order=1, updated_at=datetime(2026, 1, 1),
+    )
+    restored = TableConfigStepEntry.model_validate_json(entry.model_dump_json())
+    assert restored.gear_label == "R"
+    assert restored.direction == Direction.RU
+    assert restored.step_order == 1
+
+
+def test_table_config_step_entry_step_order_must_be_at_least_one():
+    with pytest.raises(ValidationError):
+        TableConfigStepEntry(
+            model_id="MODEL-A", program_name="REVA", gear_label="R", direction=Direction.RU,
+            step_order=0, updated_at=datetime(2026, 1, 1),
+        )
+
+
+def test_table_config_parameter_entry_roundtrip():
+    entry = TableConfigParameterEntry(
+        model_id="MODEL-A", program_name="REVA", channel_name="vib_a",
+        stat_name="RMS Avg", updated_at=datetime(2026, 1, 1),
+    )
+    restored = TableConfigParameterEntry.model_validate_json(entry.model_dump_json())
+    assert restored.stat_name == "RMS Avg"
+    assert restored.channel_name == "vib_a"
+
+
+def test_table_config_parameter_entry_accepts_non_graded_context_columns():
+    # "Speed"/"Time" are not PARAMETER_CATALOG keys but the real screen's
+    # checklist includes them -- stat_name is a bare str here (see the
+    # class docstring), so this must validate.
+    entry = TableConfigParameterEntry(
+        model_id="MODEL-A", program_name="REVA", stat_name="Speed", updated_at=datetime(2026, 1, 1),
+    )
+    assert entry.stat_name == "Speed"

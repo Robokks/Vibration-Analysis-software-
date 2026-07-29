@@ -163,6 +163,14 @@ PARAMETER_CATALOG: dict[str, ParameterSpec] = _build_catalog()
 # passed through for display, never graded.
 assert len(PARAMETER_CATALOG) == 49
 
+# The real Table Config.vi "PARAMETER CONFIG" tab's checklist includes these
+# two non-graded context columns alongside the 49 catalog entries (Phase E).
+# Referenced there for schema fidelity with the real screen; currently inert
+# for analysis_engine.reports.table_config.apply_table_config() -- no report
+# builder in this codebase produces a Speed/Time row to filter, since
+# compute_parameter_catalog() never touches rpm/time_s.
+NON_GRADED_CONTEXT_COLUMNS: tuple[str, ...] = ("Speed", "Time")
+
 
 def _apply_unit_convert(value_g: float, unit_convert: UnitConvert) -> float:
     if unit_convert == "none":
