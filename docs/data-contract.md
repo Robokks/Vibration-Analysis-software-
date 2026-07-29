@@ -236,12 +236,22 @@ conflate them:
   boundary**. Phase B needed **zero migration** here — every `stat_name`
   column is an unconstrained `TEXT`/`String`, so it transparently carries
   49 possible values instead of 7.
-- `nvh_api_schemas.REPORT_SCHEMA_VERSION = "2.0"` governs the separate
+- `nvh_api_schemas.REPORT_SCHEMA_VERSION = "2.1"` governs the separate
   **analysis-engine -> nvh_api_schemas report-shape boundary**. This bumped
-  because `DcAnalysisResultOut.stats: SignalStatsOut` (7 hardcoded fields)
-  was replaced by `DcAnalysisResultOut.parameters: dict[str, float]` (a
-  breaking shape change) — but that change has nothing to do with the
-  Parquet/DB contract, so it does not bump `CONTRACT_VERSION`.
+  to `2.0` because `DcAnalysisResultOut.stats: SignalStatsOut` (7 hardcoded
+  fields) was replaced by `DcAnalysisResultOut.parameters: dict[str,
+  float]` (a breaking shape change) — but that change has nothing to do
+  with the Parquet/DB contract, so it does not bump `CONTRACT_VERSION`.
+
+  This constant has no runtime enforcement anywhere in the codebase — it's
+  a documentation-only signal for consumers. Phase D's bump (`2.0` ->
+  `2.1`) is the first change since the `2.0` bump to touch this boundary
+  (Phase C's changes were DB-only) and is purely additive (new required
+  `low`/`high` fields on `EnvelopeCheckOut`, one new `CodeResultReportOut`/
+  `CodeResultRowOut` pair, no removals) — establishing, for the first time,
+  an explicit convention: **integer bump** (`X.0`) when a field is
+  removed/renamed/replaced (a genuine breaking change for any consumer),
+  **decimal bump** (`X.Y`) when fields/schemas are purely added.
 
 ## Phase C: Master Profiles & Two-Stage Limits
 
@@ -293,6 +303,90 @@ shape for Phase D, not built yet) confirms this formula in practice: a row
 like `IN_H1 | order=13 | LOW=26 | ACTUAL=35.369 | HIGH=35 -> NOK` shows
 `LOW`/`HIGH` as already-combined effective bounds, exactly as derived
 above, compared directly against the observed value.
+
+## Phase D: Flat CODE-RESULT Grading Output
+
+Source of truth: a real exported grading-result sheet (client screenshot),
+columns `STEP | GEAR_DIRECTION | CHANNEL | PARAMETER | ORDERS | LOW |
+ACTUAL | HIGH | UNIT | OK/NOK` — one row per (gear+direction, channel,
+parameter) per test unit, e.g. `1 | I_STYC | vib_a | IN_H1(g) | 13 | 26 |
+35.369 | 35 | g | NOK`. Built by `analysis_engine.reports.code_result.
+build_code_result_report()` directly from a `list[DcAnalysisResult]`,
+following the same "compose from live pipeline output, don't widen it"
+pattern as Consolidated/Detailed/Summary.
+
+**STEP vs GEAR_DIRECTION naming note.** The Phase C `limit_configs` schema
+comment above (`gear_label -- STEP = gear_label + direction`) uses "STEP"
+as shorthand for the natural-key identity `(gear_label, direction)`. Here,
+STEP and GEAR_DIRECTION are two separate rendered columns: STEP is a
+1-based sequential ordinal over the order gear+direction combinations were
+run (`enumerate(results, start=1)`, matching the order the caller supplies
+`results` in — there is no separate "test sequence" concept modeled
+anywhere else in this codebase yet), while GEAR_DIRECTION is the human
+string label `f"{gear_label}_{direction}"` (e.g. "I_STYC" / "R_RU"). Both
+still identify the same underlying (gear_label, direction) pair — this is
+not a contradiction of the Phase C comment, just two different renderings
+of the same identity that a future reader could otherwise conflate.
+
+**LOW/HIGH resolution.** `EnvelopeCheckResult` now carries the resolved
+bounds directly (`low`/`high`), populated from whichever grading path
+produced it:
+- master+G-ladder path (`envelope_check.check_value`): `low =
+  ladder.g_level_value(low_g)`, `high = ladder.g_level_value(high_g)` — the
+  G4/G6-window bounds in value-space.
+- LIMIT/THRESHOLD path (`limit_config.check_value_with_threshold`): `low =
+  limit_low - threshold_low`, `high = limit_high + threshold_high` — the
+  already-combined effective bounds. This matches the confirmed example row
+  from the Phase C section above: `IN_H1 | order=13 | LOW=26 |
+  ACTUAL=35.369 | HIGH=35 -> NOK`.
+
+Only parameters present in a result's `grading.per_stat` get a row — a
+parameter with no master/limit-config has no meaningful LOW/HIGH/OK-NOK to
+show, matching `grade_dc_record`'s/`grade_dc_record_with_limits`'s existing
+"skip stats with no master/config" pattern.
+
+**ORDERS.** `PARAMETER_CATALOG[parameter].order_fn(gear_orders)` for
+harmonic parameters, `None` for windowed base/unit-family parameters —
+identical to the ORDERS resolution `seed_demo_data.py` already performs for
+`LimitConfigRow.order_number`. `gear_orders` is looked up per row from a
+`gear_orders_by_gear: dict[str, GearOrders]` map supplied by the caller,
+keyed by `gear_label` only (`GearOrders`/`compute_gear_orders()` take no
+direction argument at all — the order matrix is a property of the gear's
+teeth/ratio, shared across all 4 directions). A gear missing from the map
+degrades to `orders=None` for its rows rather than raising, matching this
+codebase's dominant graceful-degradation style.
+
+**UNIT.** Derived from `ParameterSpec.unit_convert` via
+`analysis_engine.grading.parameters.unit_label_for()` /
+`UNIT_LABEL_BY_CONVERT` (`"none" -> "g"`, `"g_to_mps2" -> "m/s2"`,
+`"g_to_db_mps2" -> "dB m/s2"`) for all 49 parameters, not just harmonics.
+
+**Documented assumption: unit label precision.** `"g"` is the physically
+correct unit for `Mean`/`RMS`/`PK` (max+avg, 6 of 49 parameters) and for
+all 9 whole-run harmonic-peak-magnitude parameters with
+`unit_convert="none"` — 15/49 total, all literal acceleration-in-g values.
+It is *not* physically precise for `Variance` (technically g², 2
+parameters) or for `Skewness`/`Kurtosis`/`Crest` (dimensionless shape/ratio
+statistics, no physical unit at all — 6 parameters) — 8/49 total.
+`unit_convert` doesn't currently distinguish these cases; `"g"` is used as
+a placeholder rather than introducing a new unit axis, matching this
+codebase's existing practice of documenting rather than silently absorbing
+such simplifications (cf. the dB-reference-constant and
+windowing-approximation notes in the Phase B section above).
+
+**Channel scoping.** `channel_name` defaults to `"vib_a"` for every row,
+matching the existing single-channel-per-call simplification already
+documented above — `analyze_dc_record` doesn't carry channel identity on
+`DcAnalysisResult` yet, so `build_code_result_report` takes it as a
+caller-supplied constant, not a per-result field.
+
+**Not persisted yet (documented gap).** `nvh_contract.db.GradingResultRow`
+stores only `g_level`/`ok_flag` per stat, not `low`/`high`. Like the other
+report builders, `build_code_result_report` is built from live
+`DcAnalysisResult` objects, not DB rows, so this is not a blocker today —
+flagged here so a later milestone serving *historical* CODE-RESULT reports
+from stored data knows to add `low`/`high` columns to `grading_results`
+first.
 
 ## Versioning
 

@@ -13,6 +13,8 @@ from analysis_engine.grading.master_builder import MasterSignatureStats
 class EnvelopeCheckResult:
     g_level: int
     ok_flag: bool
+    low: float
+    high: float
 
 
 def check_value(
@@ -24,7 +26,9 @@ def check_value(
     ladder = compute_g_ladder(master.mean_value, master.band_min, master.band_max, master.full_scale)
     g_level = classify_g_level(ladder, value)
     ok = low_g <= g_level <= high_g
-    return EnvelopeCheckResult(g_level=g_level, ok_flag=ok)
+    return EnvelopeCheckResult(
+        g_level=g_level, ok_flag=ok, low=ladder.g_level_value(low_g), high=ladder.g_level_value(high_g)
+    )
 
 
 @dataclass(frozen=True)

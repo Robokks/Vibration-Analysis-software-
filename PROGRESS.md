@@ -6,6 +6,97 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-29 15:39 UTC — Phase D: Flat CODE-RESULT grading output table
+
+Built the flat, per-row grading output table matching the real system's
+exported grading-result sheet, confirmed from a client screenshot: `STEP |
+GEAR_DIRECTION | CHANNEL | PARAMETER | ORDERS | LOW | ACTUAL | HIGH | UNIT |
+OK/NOK`, one row per (gear+direction, channel, parameter) per test unit:
+
+- Closed the gap flagged going into this phase: `EnvelopeCheckResult`
+  (shared by both the master/G-ladder path and Phase C's LIMIT/THRESHOLD
+  path) gained `low`/`high` resolved-bound fields — `envelope_check.
+  check_value()` populates them from the G4/G6-window's `GLadder.
+  g_level_value()`, `limit_config.check_value_with_threshold()` threads
+  through the `effective_low`/`effective_high` it was already computing
+  but discarding. Purely additive: only 2 construction sites repo-wide,
+  zero direct constructions in tests.
+- New `analysis_engine.reports.code_result`: `CodeResultRow`/
+  `CodeResultReport`/`build_code_result_report()`, following the exact
+  `consolidated.py`/`detailed.py`/`summary.py` pattern (built from live
+  `DcAnalysisResult` objects, never DB rows). Takes a
+  `gear_orders_by_gear: dict[str, GearOrders]` map (keyed by gear_label,
+  since the order matrix has no direction dependence) rather than widening
+  `DcAnalysisResult` itself, keeping every existing report/schema
+  untouched — confirmed zero consumers of those types exist yet anywhere
+  in `web-backend/`/`qt-app/`/`web-frontend/`.
+- Exposed `parameters.UNIT_LABEL_BY_CONVERT`/`unit_label_for()` (was a
+  private harmonic-only helper) as the UNIT column's source for all 49
+  parameters — documented explicitly that `"g"` is a placeholder, not a
+  precise label, for `Variance`/`Skewness`/`Kurtosis`/`Crest` (8 of 49
+  parameters are dimensionless or g² and don't have a real "g" unit).
+- `nvh_api_schemas`: `EnvelopeCheckOut` gained `low`/`high`; new
+  `CodeResultRowOut`/`CodeResultReportOut`. `REPORT_SCHEMA_VERSION` bumped
+  `2.0` -> `2.1`, establishing (this constant has zero runtime consumers,
+  it's documentation-only) an explicit convention going forward: integer
+  bump for breaking/removed fields, decimal bump for purely-additive ones.
+- Planned via a Plan sub-agent validating the design against the real
+  code (same workflow as Phase A/B) — it caught the base-parameter unit
+  label count being off (10 non-unit-family base entries, not 12, and the
+  physical-unit imprecision affecting 8/49 params specifically, not just
+  "some"), confirmed `REPORT_SCHEMA_VERSION` has no runtime enforcement
+  anywhere (strengthening the case for treating this bump as establishing
+  a new convention rather than just following one), and confirmed
+  `reports/types.py` is dead code not to be used as a pattern reference.
+- New `docs/data-contract.md` "Phase D" section: STEP-vs-GEAR_DIRECTION
+  disambiguation against Phase C's existing informal "STEP" comment,
+  LOW/HIGH resolution per grading path, ORDERS/UNIT derivation, and a
+  documented forward gap (`grading_results` DB table doesn't persist
+  `low`/`high` yet — fine today since no report type in this codebase is
+  built from DB rows, will matter once a future milestone serves
+  *historical* CODE-RESULT reports from stored data).
+- Deliberately out of scope, with reasoning recorded in the plan: no
+  `seed_demo_data.py` demo-emission wiring (no real consumer yet to
+  justify it, and Phase C's own precedent didn't add one either despite
+  adding a whole new grading path); no `grading_results` DB schema change
+  (see forward-gap note above); no `DcAnalysisResult`/`pipeline.py`
+  changes (kept purely additive to the new report module only).
+- **Result:** 132/132 tests passing across every package (analysis-engine,
+  simulator, `nvh_contract`, `nvh_api_schemas`, design-tokens, web-backend);
+  CLI demo and `seed_demo_data.py` re-verified end-to-end, unaffected.
+
+## 2026-07-29 15:11 UTC — Phase C: Named master profiles + two-stage LIMIT/THRESHOLD config
+**Commit:** `da80efd`
+
+*(This entry was written retroactively — Phase C landed in a separate
+session that didn't update this log at the time; recorded now for
+continuity before Phase D builds on top of it.)*
+
+Added named master profiles (the real system's "NVH-PROGRAM", e.g.
+"REVA") and a two-stage LIMIT (auto-computed from masters, via "Import
+From MASTER")/THRESHOLD (manually-tunable margin) limit-configuration
+path, matching the real system's `Limit Config.vi` screen:
+
+- `nvh_contract`: new `MasterProfile`/`LimitConfigEntry` pydantic models +
+  `MasterProfileRow`/`LimitConfigRow` ORM tables (`master_profiles`,
+  `limit_configs`).
+- New `analysis_engine.grading.limit_config`: `import_limit_config_from_
+  masters()` (the "Import From MASTER" button's backend — seeds
+  `limit_low`/`limit_high` from the auto-computed master band,
+  `threshold_low`/`threshold_high` defaulted to `0.0`), plus
+  `check_value_with_threshold()`/`grade_dc_record_with_limits()` — a
+  genuinely new, parallel pass/fail path (`effective_low/high = limit
+  -+ threshold`) that does not replace or modify the existing
+  master+G4-G6-window path.
+- `pipeline.analyze_dc_record()` gained an optional `limit_configs`
+  parameter; every existing call site (masters + G4-G6 window) behaves
+  identically — purely additive.
+- `seed_demo_data.py` now persists a "REVA" profile importing the master
+  band (though the 3 demo scenarios still grade via the plain masters
+  path, not `limit_configs`), and fixed a real idempotency bug along the
+  way (`LimitConfigRow` used `session.add()` instead of `merge()`,
+  breaking re-runs against the same DB).
+
 ## 2026-07-29 14:24 UTC — Phase B: Named 49-parameter grading framework
 **Commit:** `5603a1d`
 
@@ -106,12 +197,15 @@ Per the approved reconciliation plan (Phases A–E, reconciling the domain
 model against the real LabVIEW system before building the web/Qt Report
 GUI in M1):
 
-- **Phase C** (not started): named master profiles (`NVH-PROGRAM`) +
+- **Phase C** (done, `da80efd`): named master profiles (`NVH-PROGRAM`) +
   two-stage LIMIT (auto-computed) / THRESHOLD (manually tuned) limit
   configuration.
-- **Phase D** (not started): flat CODE-RESULT-style grading output table,
+- **Phase D** (done): flat CODE-RESULT-style grading output table,
   matching the real system's report shape.
 - **Phase E** (not started): table/report configuration model (which
   columns/parameters show where).
 - **M1** (after A–E): FastAPI backend + web/Qt Report GUI, built against
-  the now-reconciled domain shapes.
+  the now-reconciled domain shapes. (A GUI *scaffold* — app shell +
+  placeholder screens, no live data wiring — already exists in
+  `web-frontend/`/`qt-app/`, built ahead of M1 to have the visual shell
+  ready; see their own READMEs.)

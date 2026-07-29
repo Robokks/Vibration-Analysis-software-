@@ -296,6 +296,115 @@ harness's structured summary is available). Will update the recurring
 hourly Routine's prompt to append full new turns to this file going
 forward, not just a condensed line.
 
+### Turn — new session, Phase D: flat CODE-RESULT grading output table
+**User:** "Continue work on branch claude/nvh-software-python-28zib3 in the
+Robokks/vibration-analysis-software- repo. Read CONVERSATION_LOG.md and
+PROGRESS.md at the repo root first — they have the full history and design
+decisions for Phases A/B/C. Next up is Phase D: flat CODE-RESULT-style
+grading output table. The real target shape is already confirmed from a
+client screenshot: STEP | GEAR_DIRECTION (e.g. "I_STYC") | CHANNEL |
+PARAMETER | ORDERS | LOW | ACTUAL | HIGH | UNIT | OK/NOK, one row per
+(gear+direction, channel, parameter) per test unit. This builds on Phase
+C's analysis_engine.grading.limit_config module (LIMIT/THRESHOLD) and
+Phase B's 49-parameter catalog (analysis_engine.grading.parameters.
+PARAMETER_CATALOG). Known gap to resolve: today's EnvelopeCheckResult only
+exposes g_level/ok_flag, not the resolved LOW/HIGH bounds a flat report row
+needs — that likely needs a small extension. Use plan mode before
+implementing, same as prior phases."
+
+**Assistant:** Checked out the branch fresh from origin — it had moved
+ahead since last seen on it: Phase C (`da80efd`) and a merged GUI-scaffold
+PR (`3b92fa4`, `web-frontend`/`qt-app` scaffolds from a separate branch)
+had both landed. Read `PROGRESS.md`/`CONVERSATION_LOG.md` as instructed,
+but found both stale for Phase C — neither mentions it at all, even though
+it's merged (it was built in a separate session with a different
+Claude-Session ID that didn't update either log). Cross-checked against
+`docs/data-contract.md`'s own Phase C section, which *was* kept current,
+and read the actual code directly (`envelope_check.py`, `limit_config.py`,
+`g_ladder.py`, `parameters.py`, `pipeline.py`, `nvh_contract`'s
+`MasterProfile`/`LimitConfigEntry` models, the reports layer,
+`nvh_api_schemas/report.py`, `seed_demo_data.py`, and every relevant
+existing test file) rather than trusting the stale logs.
+
+Entered plan mode. Launched a Plan sub-agent with the full confirmed
+design as a brief, to validate it against the real code — the same
+workflow used for Phase A/B per this log. It came back with several real
+corrections: the base-parameter unit-label reuse claim was off by count
+(10 non-unit-family base entries among the 14, not 12) and the physical-
+unit imprecision is specific and larger than "a reasonable default" — 8 of
+49 parameters (`Variance`/`Skewness`/`Kurtosis`/`Crest`, max+avg) are
+dimensionless or g², not genuinely "g"; `REPORT_SCHEMA_VERSION` has zero
+runtime consumers anywhere in the repo (pure documentation), strengthening
+the case for a "2.1" bump but also meaning there's no real precedent yet
+distinguishing additive-vs-breaking bumps, so the plan should establish
+that convention explicitly rather than assume it exists; `docs/data-
+contract.md`'s existing Phase C section already uses "STEP" informally for
+`(gear_label, direction)` in a schema comment, needing a one-line
+disambiguation against the new ordinal STEP column, not a rewrite; and
+confirmed `analysis_engine/reports/types.py` is dead code (zero
+importers), not a pattern to follow. Verified the agent's key claims
+directly before trusting them — grepped `_HARMONIC_UNIT_SUFFIX`/
+`REPORT_SCHEMA_VERSION`/`reports.types` usage repo-wide, and re-derived the
+10-vs-12 parameter count from `_BASE_STATS`/`_UNIT_FAMILY_LABELS` by hand.
+
+Wrote the final plan to `/root/.claude/plans/modular-coalescing-adleman.md`
+(full text folded into `docs/data-contract.md`'s new Phase D section
+rather than repeated here, matching the Phase B precedent above): extend
+`EnvelopeCheckResult` with `low`/`high` (populated from `GLadder.
+g_level_value(low_g/high_g)` on the master/G-ladder path, from the
+already-computed-but-discarded `effective_low`/`effective_high` on the
+Phase C limit-config path); expose `parameters.UNIT_LABEL_BY_CONVERT`/
+`unit_label_for()` (was private, harmonic-name-only) with the unit-
+precision caveat documented explicitly; a new `analysis_engine.reports.
+code_result` module (`CodeResultRow`/`CodeResultReport`/
+`build_code_result_report()`) following the exact Consolidated/Detailed/
+Summary pattern — built from live `DcAnalysisResult` objects, never DB
+rows — taking a `gear_orders_by_gear: dict[str, GearOrders]` map alongside
+`results: list[DcAnalysisResult]` rather than widening `DcAnalysisResult`
+itself (confirmed zero consumers of that type exist yet in `web-backend/`/
+`qt-app/`/`web-frontend/`, so this is genuinely the lowest-blast-radius
+option, not just the safest-looking one — and mirrors exactly how
+`seed_demo_data.py` already resolves `LimitConfigRow.order_number`);
+matching `nvh_api_schemas` wire schemas plus `REPORT_SCHEMA_VERSION`
+`"2.0"` -> `"2.1"`; new tests following the existing fixture conventions
+exactly; the `docs/data-contract.md` Phase D section; and explicit
+out-of-scope items with reasoning recorded (no `seed_demo_data.py` demo
+wiring, no `grading_results` DB schema change, no `DcAnalysisResult`/
+`pipeline.py` changes).
+
+**User:** approved the plan (via the ExitPlanMode tool's approval flow).
+
+### Turn — Phase D implementation
+**Assistant:** Implemented the approved plan file-by-file: extended
+`EnvelopeCheckResult` and both its construction sites (`envelope_check.
+check_value()`, `limit_config.check_value_with_threshold()`); exposed
+`UNIT_LABEL_BY_CONVERT`/`unit_label_for()` in `parameters.py` with the
+documented unit-precision caveat inline; created `analysis_engine/reports/
+code_result.py` and exported it from `reports/__init__.py`; added
+`EnvelopeCheckOut.low`/`.high`, `CodeResultRowOut`, `CodeResultReportOut`
+to `nvh_api_schemas/report.py`, exported them and bumped
+`REPORT_SCHEMA_VERSION` to `"2.1"` in `__init__.py`; wrote
+`test_code_result.py` (masters path, limit-configs path, step ordering
+across multiple results, ungraded-parameter skipping, missing-gear
+graceful degradation, unit-label checks for native/converted/harmonic
+parameters) plus small `.low`/`.high` assertions added to
+`test_grading.py`/`test_limit_config.py` and a new contract test in
+`test_report_schema_contract.py`; wrote the `docs/data-contract.md` Phase D
+section (STEP/GEAR_DIRECTION disambiguation, LOW/HIGH resolution per
+grading path, ORDERS/UNIT derivation and its documented assumption, the
+not-yet-persisted `grading_results` gap) plus the versioning-convention
+addendum in the existing "Report/API contract versioning" section.
+Installed all editable packages into a fresh venv and ran the full
+cross-package suite — **132/132 tests passing** (analysis-engine,
+simulator, `nvh_contract`, `nvh_api_schemas`, `design-tokens`,
+`web-backend`) — then re-ran the CLI demo (`nvh-sim`) and
+`seed_demo_data.py` end-to-end to confirm no regressions in either.
+Backfilled a retroactive `PROGRESS.md` entry for Phase C (landed in an
+earlier, separate session that never logged it) before adding the new
+Phase D entry, since Phase D directly builds on Phase C and continuity
+mattered more than leaving the gap — flagged clearly in the entry itself
+as written retroactively, not implying it happened in this session.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)

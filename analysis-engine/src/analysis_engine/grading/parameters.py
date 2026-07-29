@@ -102,7 +102,16 @@ _HARMONICS: tuple[tuple[str, Callable[[GearOrders], float | None], float], ...] 
 )
 
 _REDUCTION_LABEL: dict[str, str] = {"max": "max", "avg": "Avg"}  # base-stat names: lowercase "max", capitalized "Avg"
-_HARMONIC_UNIT_SUFFIX: dict[UnitConvert, str] = {"none": "g", "g_to_mps2": "m/s2", "g_to_db_mps2": "dB m/s2"}
+
+# UNIT column source for Phase D's flat CODE-RESULT report (analysis_engine.reports.code_result).
+# "none" -> "g" is physically correct for Mean/RMS/PK (6 of 49 parameters) and all 9 whole-run
+# harmonic unit_convert="none" entries (genuine acceleration-in-g peak magnitudes) -- 15/49 total.
+# It is a placeholder, not a precise label, for Variance (technically g^2, 2 parameters) and
+# Skewness/Kurtosis/Crest (dimensionless ratios, 6 parameters) -- 8/49 total. unit_convert doesn't
+# model a 4th "dimensionless" case; reusing "g" is the simplest option and is flagged here rather
+# than silently absorbed. See docs/data-contract.md's Phase D section.
+UNIT_LABEL_BY_CONVERT: dict[UnitConvert, str] = {"none": "g", "g_to_mps2": "m/s2", "g_to_db_mps2": "dB m/s2"}
+_HARMONIC_UNIT_SUFFIX = UNIT_LABEL_BY_CONVERT  # existing internal usage below keeps working unchanged
 
 
 def _build_catalog() -> dict[str, ParameterSpec]:
@@ -203,3 +212,9 @@ def compute_parameter_catalog(
 
 def default_full_scale_by_param() -> dict[str, float]:
     return {name: spec.default_full_scale for name, spec in PARAMETER_CATALOG.items()}
+
+
+def unit_label_for(spec: ParameterSpec) -> str:
+    """UNIT column source for the flat CODE-RESULT report -- see the
+    documented assumption above UNIT_LABEL_BY_CONVERT."""
+    return UNIT_LABEL_BY_CONVERT[spec.unit_convert]

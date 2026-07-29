@@ -12,11 +12,12 @@ from analysis_engine.grading.master_builder import build_master_signature
 from analysis_engine.grading.parameters import default_full_scale_by_param
 from analysis_engine.ordermatrix.gear_math import GearTeeth, compute_gear_orders
 from analysis_engine.pipeline import analyze_dc_record, build_masters_from_trials, compute_trial_parameters
+from analysis_engine.reports.code_result import build_code_result_report
 from analysis_engine.reports.consolidated import build_consolidated_report
 from analysis_engine.reports.detailed import build_detailed_report
 from analysis_engine.reports.serialization import to_jsonable
 from analysis_engine.reports.summary import SummaryReportRow, build_summary_report
-from nvh_api_schemas import ConsolidatedReportOut, DetailedReportOut, SummaryReportOut
+from nvh_api_schemas import CodeResultReportOut, ConsolidatedReportOut, DetailedReportOut, SummaryReportOut
 
 GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft_1=36, layshaft=32), gear_ratio=3.753)
 SAMPLE_RATE_HZ = 5000.0
@@ -112,3 +113,15 @@ def test_summary_report_matches_schema():
     validated = SummaryReportOut.model_validate(payload)
     assert validated.stat_name == "RMS Avg"
     assert len(validated.rows) == 5
+
+
+def test_code_result_report_matches_schema():
+    masters = _masters()
+    signal, t, rpm = _signal(999)
+    result = analyze_dc_record(signal, t, rpm, SAMPLE_RATE_HZ, "R", "RU", GEAR_R, masters)
+    report = build_code_result_report([result], {"R": GEAR_R})
+
+    payload = to_jsonable(report)
+    validated = CodeResultReportOut.model_validate(payload)
+    assert len(validated.rows) == len(result.grading.per_stat)
+    assert all(row.step == 1 for row in validated.rows)
