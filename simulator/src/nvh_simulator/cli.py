@@ -17,7 +17,7 @@ from nvh_simulator.faults import Fault
 from nvh_simulator.generators import generate_dc_record
 
 # MODEL-A gear geometry, taken from the reference system's Master Entry screen.
-GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft=36, layshaft=32), gear_ratio=3.753)
+GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft_1=36, layshaft=32), gear_ratio=3.753)
 
 SAMPLE_RATE_HZ = 5000.0
 RPM_START, RPM_END = 1000.0, 2500.0

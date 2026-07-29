@@ -10,7 +10,7 @@ from nvh_simulator.generators import (
     tach_pulse_train,
 )
 
-GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft=36, layshaft=32), gear_ratio=3.753)
+GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft_1=36, layshaft=32), gear_ratio=3.753)
 
 
 def test_rpm_ramps_linearly():

@@ -14,7 +14,7 @@ from analysis_engine.reports.serialization import to_jsonable
 from analysis_engine.reports.summary import SummaryReportRow, build_summary_report
 from analysis_engine.signal.stats import compute_stats
 
-GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft=36, layshaft=32), gear_ratio=3.753)
+GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft_1=36, layshaft=32), gear_ratio=3.753)
 SAMPLE_RATE_HZ = 5000.0
 DURATION_S = 3.0
 FULL_SCALE_BY_STAT = {name: 10.0 for name in STAT_NAMES}
@@ -67,7 +67,7 @@ def _dummy_model() -> Model:
         model_id="MODEL-A",
         model_name="Nano 4 Speed",
         drive_teeth={"R": 12},
-        idler_teeth={"R": 36},
+        idler_teeth_1={"R": 36},
         layshaft_teeth={"R": 32},
         ratios={"R": 3.753},
     )

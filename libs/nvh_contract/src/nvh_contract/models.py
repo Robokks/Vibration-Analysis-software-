@@ -10,8 +10,14 @@ from pydantic import BaseModel, Field
 
 
 class Direction(str, Enum):
-    RU = "RU"
-    RD = "RD"
+    RU = "RU"      # Run-up             (PLC nvh_id 0)
+    STYD = "STYD"  # Steady state/drive (PLC nvh_id 1)
+    STYC = "STYC"  # Steady coast       (PLC nvh_id 2)
+    RD = "RD"      # Run-down           (PLC nvh_id 3)
+    # PLC nvh_id -1 ("no log") is a transport-layer sentinel, not a domain
+    # value, and is intentionally not represented here. Reverse (R)
+    # conventionally only logs RU/STYD/RD (no STYC) -- a data/config
+    # convention, not enforced by this enum; see Phase B/E.
 
 
 class Domain(str, Enum):
@@ -29,8 +35,13 @@ class Model(BaseModel):
     model_id: str
     model_name: str
     drive_teeth: dict[str, int]
-    idler_teeth: dict[str, int]
+    idler_teeth_1: dict[str, int]
+    idler_teeth_2: dict[str, int] = Field(default_factory=dict)
     layshaft_teeth: dict[str, int]
+    drive_shaft_bearing_roll: dict[str, float] = Field(default_factory=dict)
+    layshaft_bearing_roll: dict[str, float] = Field(default_factory=dict)
+    fdr_teeth: dict[str, int] = Field(default_factory=dict)
+    fd_sel: dict[str, str] = Field(default_factory=dict)
     ratios: dict[str, float]
 
 

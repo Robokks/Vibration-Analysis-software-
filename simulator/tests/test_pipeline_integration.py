@@ -12,7 +12,7 @@ from analysis_engine.signal.stats import compute_stats
 from nvh_simulator.faults import Fault
 from nvh_simulator.generators import generate_dc_record
 
-GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft=36, layshaft=32), gear_ratio=3.753)
+GEAR_R = compute_gear_orders("R", GearTeeth(drive_shaft=12, idler_shaft_1=36, layshaft=32), gear_ratio=3.753)
 SAMPLE_RATE_HZ = 5000
 RPM_START, RPM_END = 1000, 2500
 DURATION_S = 4.0

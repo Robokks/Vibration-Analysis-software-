@@ -52,7 +52,7 @@ FULL_SCALE_BY_STAT = {
     "mean": 10.0, "variance": 10.0, "skewness": 10.0, "kurtosis": 30.0, "rms": 10.0, "peak": 20.0, "crest": 5.0,
 }
 
-GEAR_R = compute_gear_orders(GEAR_LABEL, GearTeeth(drive_shaft=12, idler_shaft=36, layshaft=32), gear_ratio=3.753)
+GEAR_R = compute_gear_orders(GEAR_LABEL, GearTeeth(drive_shaft=12, idler_shaft_1=36, layshaft=32), gear_ratio=3.753)
 
 
 def _now_iso() -> str:
@@ -87,7 +87,7 @@ def seed(data_root: Path, db_url: str, n_trials: int, seed_value: int) -> dict:
                 model_id=MODEL_ID,
                 model_name="Nano 4 Speed",
                 drive_teeth_json=json.dumps({GEAR_LABEL: 12}),
-                idler_teeth_json=json.dumps({GEAR_LABEL: 36}),
+                idler_teeth_1_json=json.dumps({GEAR_LABEL: 36}),
                 layshaft_teeth_json=json.dumps({GEAR_LABEL: 32}),
                 ratios_json=json.dumps({GEAR_LABEL: 3.753}),
             )

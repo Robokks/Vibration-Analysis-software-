@@ -39,8 +39,13 @@ CREATE TABLE models (
     model_id            TEXT PRIMARY KEY,
     model_name          TEXT NOT NULL,
     drive_teeth_json     TEXT NOT NULL,   -- {"N": 1, "R": 12, "I": 12, ...}
-    idler_teeth_json     TEXT NOT NULL,
+    idler_teeth_1_json   TEXT NOT NULL,   -- Master Entry screen's "IDLER SHAFT1 TEETH"
+    idler_teeth_2_json   TEXT NOT NULL DEFAULT '{}',  -- "IDLER SHAFT2 TEETH"
     layshaft_teeth_json  TEXT NOT NULL,
+    drive_shaft_bearing_roll_json TEXT NOT NULL DEFAULT '{}',  -- "DRIVE SHAFT BEARING ROLL" (order, direct entry)
+    layshaft_bearing_roll_json    TEXT NOT NULL DEFAULT '{}',  -- "LAY SHAFT BEARING ROLL" (order, direct entry)
+    fdr_teeth_json       TEXT NOT NULL DEFAULT '{}',  -- available final-drive variants, e.g. {"FDR1": 27, "FDR2": 30}
+    fd_sel_json          TEXT NOT NULL DEFAULT '{}',  -- per-gear FDR selection, e.g. {"R": "FDR1"} ("FD SEL" column)
     ratios_json          TEXT NOT NULL    -- {"R": 3.753, "I": 4.105, ...}
 );
 
@@ -62,7 +67,12 @@ CREATE TABLE dc_records (
     dc_id            TEXT PRIMARY KEY,
     test_run_id      TEXT NOT NULL REFERENCES test_runs(test_run_id),
     gear_label       TEXT NOT NULL,          -- e.g. 'R', 'I', 'II'
-    direction        TEXT CHECK (direction IN ('RU','RD')) NOT NULL,
+    -- direction cycle per gear: RU -> STYD -> STYC -> RD (PLC nvh_id 0/1/2/3;
+    -- nvh_id -1 "no log" is a transport sentinel, never persisted here).
+    -- Reverse (R) conventionally only logs RU/STYD/RD (no STYC) -- a
+    -- data/config convention, not enforced by this CHECK (or by the
+    -- SQLAlchemy ORM, which has no CheckConstraint on this column today).
+    direction        TEXT CHECK (direction IN ('RU','STYD','STYC','RD')) NOT NULL,
     rpm_start        REAL NOT NULL,
     rpm_end          REAL NOT NULL,
     sample_rate_hz   REAL NOT NULL,

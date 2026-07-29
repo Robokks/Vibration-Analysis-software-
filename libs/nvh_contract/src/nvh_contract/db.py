@@ -26,8 +26,13 @@ class ModelRow(Base):
     model_id = Column(String, primary_key=True)
     model_name = Column(String, nullable=False)
     drive_teeth_json = Column(String, nullable=False)
-    idler_teeth_json = Column(String, nullable=False)
+    idler_teeth_1_json = Column(String, nullable=False)
+    idler_teeth_2_json = Column(String, nullable=False, default="{}")
     layshaft_teeth_json = Column(String, nullable=False)
+    drive_shaft_bearing_roll_json = Column(String, nullable=False, default="{}")
+    layshaft_bearing_roll_json = Column(String, nullable=False, default="{}")
+    fdr_teeth_json = Column(String, nullable=False, default="{}")
+    fd_sel_json = Column(String, nullable=False, default="{}")
     ratios_json = Column(String, nullable=False)
 
 
