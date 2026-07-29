@@ -8,8 +8,9 @@ dependencies = [
     "nvh-api-schemas",
     "analysis-engine",
     "fastapi>=0.110",
-    "uvicorn>=0.29",
+    "uvicorn[standard]>=0.29",
     "httpx>=0.27",
+    "pyzmq>=25",
 ]
 
 [project.scripts]

@@ -2,9 +2,16 @@
 
 FastAPI service (`nvh_web_backend`) serving the demo SQLite DB (populated
 by `scripts/seed_demo_data.py`) so the `web-frontend`/`qt-app` Report GUI
-clients can show real data on their Master Entry and Reports screens.
-**Live Display is out of scope** — it needs a continuous live stream and
-nothing in this codebase produces one yet.
+clients can show real data across all three screens: Master Entry,
+Reports (Consolidated / Detailed / Summary / Code-Result), and
+Live Display.
+
+The Live Display side is a ZeroMQ PUB → SUB → WebSocket relay:
+`scripts/live_simulator.py` publishes signal chunks + status events over
+ZMQ (`tcp://127.0.0.1:5555` by default), the FastAPI app subscribes and
+fans out to any client connected to `/live/ws`. Designed so LabVIEW can
+drop-in replace the simulator as the ZMQ producer later without touching
+anything downstream (relay, WebSocket schema, or GUIs).
 
 ## Design
 

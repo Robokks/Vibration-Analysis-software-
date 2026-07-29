@@ -8,10 +8,15 @@ from __future__ import annotations
 import os
 
 DEFAULT_DB_URL = "sqlite:///./data/nvh_demo/nvh_demo.db"
+DEFAULT_LIVE_SUB_URL = "tcp://127.0.0.1:5555"
 
 
 def db_url() -> str:
     return os.environ.get("NVH_DB_URL", DEFAULT_DB_URL)
+
+
+def live_sub_url() -> str:
+    return os.environ.get("NVH_LIVE_SUB_URL", DEFAULT_LIVE_SUB_URL)
 
 
 def host() -> str:

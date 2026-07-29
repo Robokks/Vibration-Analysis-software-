@@ -1,7 +1,7 @@
 [project]
 name = "nvh-qt-app"
 version = "0.1.0"
-description = "PySide6 Report GUI desktop client for the NVH EOL test system (scaffold only, no live data wiring yet)"
+description = "PySide6 Report GUI desktop client for the NVH EOL test system (Master Entry/Reports + Live Display all wired to nvh-web-backend)"
 requires-python = ">=3.11"
 dependencies = [
     "nvh-design-tokens",

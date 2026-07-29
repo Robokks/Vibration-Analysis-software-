@@ -1,15 +1,20 @@
 # web-frontend
 
-Vite + React + TypeScript + Tailwind Report GUI web client. **Master Entry**
-and **Reports** are wired to a live [`../web-backend`](../web-backend)
-FastAPI service (`src/lib/api.ts`) and show the real seeded demo dataset
-(one model/program/gear/direction, 3 test-run scenarios). **Live Display**
-is still a placeholder (`TODO:` banner) — it needs a continuous live stream
-and nothing in this codebase produces one yet.
+Vite + React + TypeScript + Tailwind Report GUI web client. All three
+screens are wired to a live [`../web-backend`](../web-backend) FastAPI
+service:
+- **Master Entry** / **Reports** — real gear teeth, master signatures,
+  limit configs, and Consolidated/Detailed/Summary/Code-Result reports
+  from the seeded demo dataset via REST (`src/lib/api.ts`).
+- **Live Display** — real streaming signal trace + PASS/FAIL stamp via a
+  WebSocket to `/live/ws` (`src/lib/useLiveEvents.ts`), which the backend
+  relays from `../web-backend/scripts/live_simulator.py`'s ZeroMQ
+  producer.
 
-Run `../web-backend`'s server first (see its own README), then `npm run
-dev` here — set `VITE_API_BASE_URL` (defaults to `http://localhost:8000`,
-see `.env.development`) if the backend runs somewhere else.
+Run the backend + simulator first (see `../web-backend/README.md`), then
+`npm run dev` here. Set `VITE_API_BASE_URL` (defaults to
+`http://localhost:8000`, see `.env.development`) if the backend runs
+somewhere else — the WebSocket URL is derived from it automatically.
 
 ## Design tokens
 

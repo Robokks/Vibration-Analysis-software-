@@ -2,7 +2,7 @@
 // nvh_contract.models / nvh_api_schemas.{report,catalog} field-for-field --
 // these field names are load-bearing, not a UI-side choice.
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export type Direction = "RU" | "STYD" | "STYC" | "RD";
 export type OverallResult = "PASS" | "FAIL" | "PENDING";
@@ -271,3 +271,43 @@ export const api = {
       channel_name: opts.channelName ?? "vib_a",
     }),
 };
+
+// ---- realtime shapes (nvh_api_schemas.realtime) ----
+// Mirrors LiveTestRunUpdate / LiveDcUpdate / LiveSignalChunk field-for-field;
+// discriminated by `type`, one message per WebSocket text frame.
+
+export interface LiveTestRunUpdate {
+  type: "test_run";
+  test_run_id: string;
+  station_id: string;
+  status: "RUNNING" | "COMPLETED";
+  overall_result: string | null;
+}
+
+export interface LiveDcUpdate {
+  type: "dc";
+  dc_id: string;
+  test_run_id: string;
+  station_id: string;
+  gear_label: string;
+  direction: string;
+  stamp: "PASS" | "FAIL";
+  fail_reason_codes: string[];
+}
+
+export interface LiveSignalChunk {
+  type: "signal_chunk";
+  test_run_id: string;
+  dc_id: string;
+  station_id: string;
+  gear_label: string;
+  direction: string;
+  channel_name: string;
+  sample_rate_hz: number;
+  chunk_index: number;
+  time_s: number[];
+  values: number[];
+  rpm: number[];
+}
+
+export type LiveEvent = LiveTestRunUpdate | LiveDcUpdate | LiveSignalChunk;

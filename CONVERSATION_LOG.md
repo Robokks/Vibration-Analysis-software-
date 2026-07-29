@@ -632,6 +632,86 @@ only" for the two wired screens), added `web-backend/README.md` (didn't
 exist before), and this session's `PROGRESS.md`/`CONVERSATION_LOG.md`
 entries.
 
+### Turn — M1 remaining work
+**User:** answered a chip-question with "Live Display's live stream" —
+choosing to build the live stream over the alternative (write/edit
+endpoints).
+
+**Assistant:** entered plan mode to research architecture (nothing in
+the codebase produces a continuous live signal today, so this needs a
+new producer). While researching, before finalizing a plan file, the
+harness auto-exited plan mode via a system reminder.
+
+### Turn
+**User:** "using zeromq" — one-line addendum specifying transport.
+
+**Assistant:** read the existing simulator, realtime schemas, and both
+Live Display placeholders, then began implementing the schema layer
+directly (since plan mode had exited and the design was clear enough
+from the user's ZeroMQ choice + the existing scaffolds).
+
+### Turn
+**User:** "do" — mid-turn nudge to move faster (arrived while I was
+reading the seed script for constants to reuse).
+
+### Turn
+**User:** "complete all activities / don't wait my cmd / complete
+everything / spawn multiple agents / i going to sleep / don't wait my
+action" — explicit permission to run to completion autonomously,
+including spawning parallel agents for independent implementation
+pieces.
+
+**Assistant:** did exactly that. Wrote the schema layer myself
+first (`nvh_api_schemas.realtime` gained a `type`-tagged
+`LiveTestRunUpdate`/`LiveDcUpdate`/`LiveSignalChunk` union +
+`LiveEventEnvelope`), then spawned four background agents in parallel
+against that fixed schema contract: (A) build the standalone ZMQ
+producer script, (B) add the FastAPI ZMQ SUB + WebSocket relay + wire
+into the app's lifespan, (C) rewire the web-frontend Live Display,
+(D) rewire the qt-app Live Display. Each got a detailed brief with
+exact endpoints, addresses, and file paths to keep their outputs
+integratable without coordination.
+
+All four completed successfully. The Qt agent flagged one thing I
+double-checked: it noted `QtWebSockets` lives in `PySide6-Addons`
+rather than `-Essentials`, but the existing `qt-app/pyproject.toml`
+already depends on the `PySide6` meta-package (which pulls both), so
+no dep change was needed — noted rather than modified per its brief's
+"do NOT add any new Python dependency" constraint.
+
+While integrating, ran a real end-to-end smoke test — started the
+simulator, started the backend against a real seeded DB, and connected
+a `websockets`-based client to `/live/ws`. **Caught a real bug uvicorn's
+default install doesn't ship WebSocket protocol libraries** (log said
+`WARNING: Unsupported upgrade request` and returned 404 on the WS
+upgrade). Fixed by bumping the dep `uvicorn>=0.29` → `uvicorn[standard]
+>=0.29`, then reinstalled and re-verified — WebSocket upgrade succeeded,
+all three event types (test_run/signal_chunk/dc) flowed through with
+correct 500-sample chunks.
+
+Wrote schema tagged-union tests and a backend in-process integration
+test (`web-backend/tests/test_live_relay.py`) that binds a real ZMQ PUB
+on a random free port, points `create_app()`'s SUB at it via
+monkeypatch, and asserts messages arrive byte-for-byte over
+`TestClient.websocket_connect` — covers the full ZMQ→SUB→fan-out→WS
+pipeline without needing an external process. Full cross-package
+regression: **188/188 tests passing** (4 new).
+
+Ran the real backend + simulator against real GUI clients for visual
+verification: web-frontend via headless Chromium (captured a full
+healthy → PASS transition — real seeded gear-mesh waveform in the SVG
+polyline, green PASS stamp after DC completion, cyan `accentSecondary`
+trace color, "test <id> pass" status label — zero console errors, zero
+failed network responses); qt-app via `QT_QPA_PLATFORM=offscreen` with
+the event loop actually running (caught a crash-noise-unit mid-stream,
+crash burst spikes clearly visible in the polyline over the graticule,
+station/test-run status live-updating).
+
+Then wrote this transcript entry, updated `PROGRESS.md`, refreshed the
+root/`web-backend`/`web-frontend`/`qt-app` READMEs to reflect all three
+screens being wired now (no longer "Live Display still a placeholder"),
+and pushed.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)

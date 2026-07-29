@@ -6,6 +6,83 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-29 18:30 UTC — M1: Live Display streaming via ZeroMQ → WebSocket
+
+Second (and final for this milestone's Report GUI scope) M1 slice: wired
+Live Display in both GUI clients to a continuous live signal stream,
+using ZeroMQ per the user's explicit choice — designed so LabVIEW can
+drop-in replace the simulator side later without touching anything
+downstream.
+
+- **Architecture**: producer (`web-backend/scripts/live_simulator.py`)
+  → ZMQ PUB (`tcp://127.0.0.1:5555`) → backend ZMQ SUB async task →
+  in-process fan-out to WebSocket clients → `/live/ws` → GUIs. Browsers
+  can't speak ZMQ, so the WebSocket relay is the necessary bridge; Qt
+  goes through the same WebSocket for consistency (one contract, both
+  clients).
+- **Message shapes** (`nvh_api_schemas.realtime`): three `type`-tagged
+  events — `LiveTestRunUpdate` (RUNNING/COMPLETED), `LiveDcUpdate`
+  (per-DC PASS/FAIL stamp), `LiveSignalChunk` (500-sample slices of the
+  current channel's time-series + rpm, streamed ~10 chunks/sec at wall
+  clock). One `LiveEvent` union across all three.
+- **Simulator**: cycles indefinitely through the 3 demo scenarios
+  (healthy → PASS, crash-noise → FAIL, slippage → FAIL) — builds a full
+  DC record via the existing `generate_dc_record()` and chunks it out
+  over wall-clock time with a fresh `np.random.default_rng()` per cycle
+  so each cycle's noise is different (matches "real acquisition" better
+  than the deterministic-seed batch simulator does).
+- **Backend relay** (`nvh_web_backend.live_relay.LiveRelay`): one
+  `zmq.asyncio.Context` + `zmq.SUB` socket, one background task fans
+  received strings out to per-WebSocket `asyncio.Queue`s (maxsize 200;
+  slow clients get their oldest message dropped rather than blocking the
+  fan-out). Lifespan-managed via FastAPI's `lifespan=` context manager
+  (started/stopped alongside the app). WebSocket endpoint is a thin
+  loop-and-forward.
+- **web-frontend Live Display**: WebSocket via `useLiveEvents` hook
+  (2s bounded reconnect), rolling 4000-sample buffer rendered as inline
+  SVG `<polyline>` inside the graticule box, auto-scaled per frame; PASS
+  in green, FAIL in red, PENDING in white; fail-reason-codes surface
+  below the card grid when present. No charting library.
+- **qt-app Live Display**: `QWebSocket` wrapped in `LiveClient` (same
+  callback-based shape as the REST `ApiClient`), new
+  `SignalTraceWidget(GraticuleWidget)` that overpaints a `QPolygonF`
+  polyline on top of the existing graticule paint; Stamp card swaps its
+  child widget between `ValueLabel`/`PassLabel`/`AlarmLabel` so the
+  existing theme QSS rules apply. No new PySide6 dependency
+  (`QtWebSockets` lives inside the already-declared `PySide6` meta-
+  package).
+- **Real bug fix caught during live smoke test**: uvicorn refused the
+  WebSocket upgrade with a `WARNING: Unsupported upgrade request` — the
+  raw `uvicorn` install doesn't include the actual WebSocket protocol
+  libraries. Fixed by bumping the dep from `uvicorn>=0.29` to
+  `uvicorn[standard]>=0.29`.
+- **Testing**: schema-side tagged-union tests
+  (`libs/nvh_api_schemas/tests/test_realtime_and_management_schemas.py`
+  now covers each `type` discriminator + `TypeAdapter[LiveEvent]`
+  dispatch); backend-side in-process integration test
+  (`web-backend/tests/test_live_relay.py` binds a real ZMQ PUB on a
+  random free port, points `create_app()`'s SUB at it, publishes real
+  `LiveTestRunUpdate`/`LiveSignalChunk` events, and asserts they arrive
+  byte-for-byte over `TestClient.websocket_connect("/live/ws")`) —
+  covers the full ZMQ → SUB → fan-out → WebSocket pipeline in one test
+  without needing an external process.
+- **Verified beyond the tests**: ran the real simulator + real backend
+  + real Vite dev server, drove Live Display in headless Chromium and
+  Qt via `QT_QPA_PLATFORM=offscreen`, and captured screenshots of both
+  clients mid-stream — web caught a full healthy → PASS transition
+  (green stamp, real seeded gear-mesh waveform in the trace), Qt caught
+  a crash-noise-unit mid-stream showing the crash burst spikes clearly
+  visible in the trace under the graticule.
+- **Parallel-agents workflow**: spawned four background agents (live
+  simulator, backend relay, web-frontend wiring, qt-app wiring) against
+  a fixed schema contract I wrote first, then reconciled + integrated
+  their outputs myself and did the end-to-end verification.
+- **Result:** 188/188 tests passing (4 new: 2 for the tagged-union
+  schema, 2 for the backend WebSocket relay); web-frontend typechecks
+  cleanly; qt-app imports cleanly; live pipeline verified end-to-end
+  with real ZMQ + WebSocket + both GUI clients rendering real streaming
+  data.
+
 ## 2026-07-29 17:06 UTC — M1 slice: FastAPI backend + wire Master Entry/Reports in both GUI clients
 
 First work against M1 now that Phases A–E are complete. Scope (confirmed
@@ -335,11 +412,13 @@ GUI in M1):
 - **Phase E** (done): Table Config — which gear+direction/parameter rows
   show in a report, and in what order.
 - **A–E complete.**
-- **M1, first slice (done):** FastAPI backend (`web-backend`/
-  `nvh_web_backend`) + Master Entry/Reports wired to it in both
-  `web-frontend` and `qt-app`.
-- **M1, remaining:** Live Display's live stream (needs a real-time signal
-  source — nothing produces one yet, deliberately deferred); write/edit
-  endpoints (today's backend is read-only — creating/editing models,
-  master profiles, limit configs, Table Configs from the GUI is a later
-  slice); the AI layer; real LabVIEW hardware integration.
+- **M1 (done):** FastAPI backend (`web-backend`/`nvh_web_backend`) + all
+  three GUI screens wired in both `web-frontend` and `qt-app`
+  (Master Entry, Reports, Live Display — the last via a ZeroMQ →
+  WebSocket relay so LabVIEW can drop-in replace the simulator later).
+- **Remaining beyond M1:** write/edit endpoints (today's backend is
+  read-only — creating/editing models, master profiles, limit configs,
+  Table Configs from the GUI is a later slice); the AI layer; real
+  LabVIEW hardware integration (the ZMQ side of the wire is already
+  agnostic to the producer — LabVIEW just needs to publish the same
+  JSON shapes on the same socket).

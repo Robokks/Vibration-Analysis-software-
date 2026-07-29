@@ -1,16 +1,19 @@
 # qt-app
 
-PySide6 Report GUI desktop client. **Master Entry** and **Reports** are
-wired to a live [`../web-backend`](../web-backend) FastAPI service
-(`api_client.py`, built on `QNetworkAccessManager` so requests never block
-the UI thread) and show the real seeded demo dataset — the same data
-`../web-frontend` shows, via the same API contract. **Live Display** is
-still a placeholder (`TODO:` banner) — it needs a continuous live stream
-and nothing in this codebase produces one yet.
+PySide6 Report GUI desktop client. All three screens are wired to a live
+[`../web-backend`](../web-backend) FastAPI service:
+- **Master Entry** / **Reports** — REST via `api_client.py`, built on
+  `QNetworkAccessManager` so requests never block the UI thread.
+- **Live Display** — streaming signal trace + PASS/FAIL stamp via
+  `QWebSocket`, wrapped in `live_client.py` (same async, callback-based
+  shape as the REST client). The trace overpaints a rolling buffer on
+  top of the existing graticule widget (`widgets/signal_trace.py`).
 
-Run `../web-backend`'s server first (see its own README, defaults to
-`http://127.0.0.1:8000`, matching `api_client.py`'s default) before
-launching this app.
+Both use the same visual language derived from `../design-tokens` and
+the same API contract as `../web-frontend`. Run the backend + live
+simulator first (see `../web-backend/README.md`, defaults to
+`http://127.0.0.1:8000` + ZeroMQ `tcp://127.0.0.1:5555`, matching this
+app's own defaults) before launching.
 
 ## Design tokens
 

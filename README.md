@@ -19,15 +19,20 @@ for the shared visual design system.
 - **GUI scaffolding: done.** `web-frontend/` (Vite+React+TS+Tailwind) and
   `qt-app/` (PySide6) app shells, sharing one visual language derived from
   `design-tokens`.
-- **M1 slice: done.** `web-backend/` — a FastAPI service serving the demo
+- **M1: done.** `web-backend/` — a FastAPI service serving the demo
   SQLite DB (reconstructing full analysis results on the fly from the raw
   Parquet signal + DB config rows, never from persisted grading snapshots).
-  Both GUI clients' **Master Entry** and **Reports** screens are wired to it
-  end-to-end (real gear/parameter/master/limit data, real
-  Consolidated/Detailed/Summary/Code-Result reports across the 3 demo test
-  runs). **Live Display stays a placeholder** — it needs a continuous live
-  stream and nothing in this codebase produces one yet.
-- **Not yet built**: the AI layer and real LabVIEW hardware integration.
+  All three GUI screens wired end-to-end in both clients: **Master Entry**,
+  **Reports** (Consolidated/Detailed/Summary/Code-Result tabs), and
+  **Live Display** — the last via a ZeroMQ PUB→SUB→WebSocket pipeline
+  (`web-backend/scripts/live_simulator.py` produces continuous signal
+  chunks + status events over ZMQ, the FastAPI backend relays to a
+  `/live/ws` WebSocket, both clients render a rolling signal trace and
+  live PASS/FAIL stamp). The ZMQ producer is designed so LabVIEW can
+  drop-in replace it later without touching anything downstream.
+- **Not yet built**: write/edit endpoints (backend is read-only today —
+  creating models/master profiles/limit configs from the GUI is a later
+  slice), the AI layer, and real LabVIEW hardware integration.
 
 ## Packages
 
@@ -71,9 +76,15 @@ Writes Parquet files under `./data/nvh_demo/` and a SQLite DB
 (`nvh_demo.db`) with one healthy and two faulted test runs — the dataset
 `web-backend` serves to the web/Qt clients.
 
-## Run the backend + a GUI client
+## Run the backend + live simulator + a GUI client
 
 ```bash
+# terminal 1 -- the live-stream producer (ZeroMQ PUB); optional for
+# Master Entry / Reports, required to see Live Display do anything
+.venv/bin/python web-backend/scripts/live_simulator.py
+
+# terminal 2 -- the FastAPI backend (serves the DB + relays the ZMQ
+# stream to /live/ws)
 NVH_DB_URL="sqlite:///./data/nvh_demo/nvh_demo.db" .venv/bin/nvh-web-backend
 ```
 
