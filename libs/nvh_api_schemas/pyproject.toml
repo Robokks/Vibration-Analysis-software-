@@ -2,7 +2,7 @@
 name = "nvh-api-schemas"
 version = "0.1.0"
 description = "Shared pydantic wire schemas for the NVH web backend and Qt desktop client — one Python source of truth for the API contract"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.6",
     "nvh-contract",

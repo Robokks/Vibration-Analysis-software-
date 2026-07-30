@@ -2,7 +2,7 @@
 name = "nvh-web-backend"
 version = "0.1.0"
 description = "FastAPI backend serving the NVH demo SQLite DB for the web/Qt Report GUI clients"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "nvh-contract",
     "nvh-api-schemas",

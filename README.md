@@ -50,6 +50,10 @@ for the shared visual design system.
 
 ## Setup
 
+**Python 3.10 or newer.** All seven local packages declare
+`requires-python = ">=3.10"`; 3.10.8 (the PyCharm bundled version many
+Windows installs land on) is fine, and 3.11/3.12 are what CI runs.
+
 From a fresh venv, install third-party deps first, then the seven local
 packages in editable mode. This is a two-step install by design:
 older `pip` releases on Windows (notably 23.2.x, as shipped by many

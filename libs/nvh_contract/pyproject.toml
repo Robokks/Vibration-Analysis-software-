@@ -2,7 +2,7 @@
 name = "nvh-contract"
 version = "0.1.0"
 description = "Shared data contract (pydantic + SQLAlchemy models) for the NVH analysis system"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.6",
     "sqlalchemy>=2.0",

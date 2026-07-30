@@ -2,7 +2,7 @@
 name = "nvh-design-tokens"
 version = "0.1.0"
 description = "Canonical design tokens (color, type, layout, signature assets) shared by the NVH web and Qt clients"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = []
 
 [build-system]

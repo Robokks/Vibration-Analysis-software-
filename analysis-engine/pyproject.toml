@@ -2,7 +2,7 @@
 name = "analysis-engine"
 version = "0.1.0"
 description = "NVH signal analysis, grading, fault detection, and SPC for the EOL gearbox test system"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "nvh-contract",
     "numpy>=1.26",
