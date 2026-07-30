@@ -50,10 +50,26 @@ for the shared visual design system.
 
 ## Setup
 
+Simplest — from a fresh venv, use the pip requirements file:
+
 ```bash
 python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt          # runtime
+.venv/bin/pip install -r requirements-dev.txt      # + pytest
+```
+
+`requirements.txt` lists third-party deps at the top and pulls the seven
+local packages (`nvh_contract`, `nvh_api_schemas`, `design-tokens`,
+`analysis-engine`, `simulator`, `web-backend`, `qt-app`) in editable
+mode with the right dependency order, so a `pip install -r ...` is
+enough to bring the whole workspace up.
+
+If you'd rather install the packages one at a time (useful when
+iterating on a single library without touching the rest):
+
+```bash
 .venv/bin/pip install -e libs/nvh_contract -e libs/nvh_api_schemas -e design-tokens \
-  -e analysis-engine -e simulator -e web-backend pytest
+  -e analysis-engine -e simulator -e web-backend -e qt-app pytest
 ```
 
 ## Run the end-to-end analysis demo
