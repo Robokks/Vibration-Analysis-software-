@@ -775,6 +775,87 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — LabVIEW ORDER SPECTRUM + ORDER TRACKING reference photos
+
+**User** attached two more phone photos of the real LabVIEW system,
+this time showing the Frequency Series' ORDER SPECTRUM and ORDER
+TRACKING sub-tabs -- the last two views I still had as placeholders.
+
+The photos revealed the exact layouts I needed:
+- **ORDER SPECTRUM tab**: two stacked plots (SPEED rpm vs TIME on
+  top, magnitude vs ORDER on bottom) + a PEAKS table on the side
+  of the bottom plot (Channel / Order / Mag columns) + a Cursor 0
+  readout showing "27.8, 273m" (order 27.8 at 273 milli-g).
+- **ORDER TRACKING tab**: one plot with N stacked traces --
+  OVERALL NOISE / SUM OF NOISE / SUM OF MOTOR / SUM OF TRANS plus
+  per-order labeled traces (13, 20, 28, 37, 44) -- and an EXPECTED
+  ORDER info table on the right.
+
+**Assistant:** built both. Checked what the analysis engine already
+had -- `analysis_engine.signal.order_spectrum.compute_order_spectrum`
+(angle-domain resampled FFT) and `.order_tracking.compute_order_
+tracking` (STFT with target bin following order × rpm(t) / 60) were
+already implemented but not wired into the Qt Live Display.
+
+Added two new widget files:
+
+- **OrderSpectrumPlot** (`widgets/order_plots.py`): QWidget hosting
+  two internal MultiSeriesPlot instances (SPEED on top, Magnitude
+  on bottom) plus a compact 2-column QTableWidget for peaks. Public
+  API: `set_speed_over_time(rpm)` / `set_spectrum(mag)` /
+  `set_peaks([(order, mag), ...])` / `clear()`.
+- **OrderTrackingPlot** (same file): QWidget wrapping one
+  MultiSeriesPlot with N named series (OVERALL + per-order
+  harmonics) plus an EXPECTED ORDER info table on the right. Public
+  API: `set_series_data(name, values)` /
+  `set_expected_orders([(name, order), ...])` / `clear()`.
+
+Live wiring in LiveDisplayScreen:
+
+- Added a bounded rpm deque (`_rpm_buffer`) that mirrors the raw-
+  trace sample buffer sample-for-sample. Each incoming chunk's
+  rpm array is padded by repeating the last known rpm if it's
+  shorter than the values array, keeping the two aligned.
+- New `_refresh_order_analysis()` runs on every 4th chunk (same
+  cadence as `_refresh_spectrogram`). Guarded on min 1024 samples
+  and a real rpm ramp (dtheta > 0 -- angular resampling divides
+  by dtheta, so a constant rpm returns garbage).
+- For order spectrum: computes via `compute_order_spectrum` with
+  samples_per_rev=180, trims the DC bin + everything above order
+  100, plots the SPEED ramp downsampled to ~500 points, plots the
+  magnitude trace, and finds the top-5 peaks by magnitude for the
+  peaks table.
+- For order tracking: iterates the tracked-order list (OVERALL,
+  12, 24, 36, 48 -- 1x/2x/3x/4x of gear R's 12-tooth mesh),
+  calls `compute_order_tracking` for each numeric order and pushes
+  the magnitude trace. OVERALL is a windowed-RMS envelope of the
+  raw signal (no specific order).
+- Both plots clear alongside the others on a fresh RUNNING event.
+
+Also chose 12/24/36/48 as the fixed tracked orders since the demo
+seeded model has gear R with 12 teeth -- these are the 1x/2x/3x/4x
+gear-mesh harmonics. Once the model's `system_parameters.orders`
+field is exposed via the API we can drive this list per-model
+instead of hardcoding.
+
+Testing: 5 new widget tests (setters accept expected shapes,
+clear resets). Full cross-package suite: **246/246 passing.**
+
+Screenshotted both sub-tabs against the running backend +
+simulator. Initial capture of Order Spectrum caught a mid-buffer-
+rebuild frame (empty plots because a fresh RUNNING event had just
+cleared everything and the buffer hadn't refilled past the 1024
+threshold yet); retried with a longer warmup and both plots
+populated correctly. Order Spectrum shows the SPEED linear ramp
+from ~980 to ~1280 rpm and three clear peaks at orders 11.98 /
+24.04 / 36 -- gear R's 12-tooth mesh fundamental + 2x + 3x
+harmonics, matching the seeded model exactly. Order Tracking shows
+five stacked Y-axes with OVERALL/12/24/36/48 traces overlaid and
+the EXPECTED ORDER table populated.
+
+Sent to the user, updated PROGRESS.md, wrote this transcript
+entry, committed, pushed.
+
 ### Turn — reference doc: "check this document" / "1 & 3"
 
 **User** attached the real system's `Vibr-O-Matic Analyzer Software

@@ -19,6 +19,8 @@ from typing import Any
 
 import numpy as np
 from analysis_engine.signal.octave import STANDARD_OCTAVE_CENTERS_HZ, compute_octave_bands
+from analysis_engine.signal.order_spectrum import compute_order_spectrum
+from analysis_engine.signal.order_tracking import compute_order_tracking
 from analysis_engine.signal.stft import compute_spectrogram
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
@@ -37,6 +39,7 @@ from ..widgets.labels import MonoLabel, SectionTitle
 from ..widgets.live_status_bar import LiveStatusBar
 from ..widgets.live_toolbar import LiveToolbar
 from ..widgets.multi_series_plot import MultiSeriesPlot
+from ..widgets.order_plots import OrderSpectrumPlot, OrderTrackingPlot
 from ..widgets.panel import Panel
 from ..widgets.placeholder_panel import PlaceholderPanel
 from ..widgets.plot_legend import PlotLegend
@@ -63,6 +66,20 @@ _PLACEHOLDER = "—"
 # Order matches the real screen's left-to-right axis column order.
 _COMPUTED_SERIES = (
     "SPEED", "CREST", "PEAK", "RMS", "KURTOSIS", "SKEWNESS", "VARIANCE", "MEAN",
+)
+
+# Order-tracking series shown on the ORDER TRACKING sub-tab. OVERALL
+# is the RMS amplitude of the raw signal per time window (aggregate),
+# the numeric labels are gear-mesh harmonics of the drive-teeth count
+# (Model-A's demo gear R has 12 teeth -- 12/24/36/48 = the 1x/2x/3x/4x
+# gear-mesh order harmonics we track). Matches the LabVIEW screen's
+# convention where each labeled trace is one order-of-interest.
+_TRACKED_ORDER_SERIES: tuple[tuple[str, float | None], ...] = (
+    ("OVERALL", None),
+    ("12", 12.0),
+    ("24", 24.0),
+    ("36", 36.0),
+    ("48", 48.0),
 )
 
 # LabVIEW PLC boundary: NVH_ID enum for direction (see docs/data-contract).
@@ -114,6 +131,12 @@ class LiveDisplayScreen(QWidget):
         # (gear_label, direction) -> stamp last painted, so a palette
         # flip can re-color Result cells with the fresh pass/alarm hex.
         self._row_stamp: dict[tuple[str, str], str] = {}
+        # Rolling rpm buffer that mirrors the raw-trace sample buffer,
+        # kept in lockstep so order tracking has an aligned rpm value
+        # for each sample. Bounded at _TRACE_MAX_SAMPLES.
+        from collections import deque
+        self._rpm_buffer: deque[float] = deque(maxlen=_TRACE_MAX_SAMPLES)
+        self._sample_rate_hz: float = 5000.0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -243,19 +266,27 @@ class LiveDisplayScreen(QWidget):
         self._octave_plot.setMinimumHeight(240)
         tabs.addTab(self._wrap_padded(self._octave_plot), "Octave")
 
-        # Only Order spectrum + Order tracking stay placeholders --
-        # they need order tracking (angular resampling by tach), which
-        # is batch-computed today.
+        # Order spectrum: SPEED-vs-time on top + magnitude-vs-order on
+        # bottom, with a peaks list. Computed by angle-domain resampling
+        # so bins are directly in orders (cycles per shaft revolution).
+        self._order_spectrum_plot = OrderSpectrumPlot()
+        self._order_spectrum_plot.setMinimumHeight(320)
+        tabs.addTab(self._wrap_padded(self._order_spectrum_plot), "Order spectrum")
+
+        # Order tracking: N traces vs time (OVERALL + gear-mesh harmonics).
+        self._order_tracking_plot = OrderTrackingPlot(
+            [name for name, _ in _TRACKED_ORDER_SERIES]
+        )
+        self._order_tracking_plot.setMinimumHeight(240)
+        self._order_tracking_plot.set_expected_orders([
+            (name, order) for name, order in _TRACKED_ORDER_SERIES if order is not None
+        ])
+        tabs.addTab(self._wrap_padded(self._order_tracking_plot), "Order tracking")
+
+        # Nothing is a placeholder any more -- keep the list so the
+        # theme-refresh path in _on_theme_changed still iterates over
+        # an empty tuple without special-casing.
         self._placeholder_panels: list[PlaceholderPanel] = []
-        for label, detail in (
-            ("Order spectrum",
-             "Batch-computed from a completed DC record. Add live order tracking to the analysis engine to wire this up."),
-            ("Order tracking",
-             "Batch-computed from a completed DC record. Needs live tach-based rpm/order tracking."),
-        ):
-            panel = PlaceholderPanel(label, detail, muted_color=self._muted)
-            self._placeholder_panels.append(panel)
-            tabs.addTab(panel, label)
         return tabs
 
     @staticmethod
@@ -385,6 +416,9 @@ class LiveDisplayScreen(QWidget):
             self._waterfall_plot.clear()
             self._cascade_plot.clear()
             self._octave_plot.clear()
+            self._order_spectrum_plot.clear()
+            self._order_tracking_plot.clear()
+            self._rpm_buffer.clear()
             self._status_bar.set_field("result", "PENDING")
 
         # Backfill operator/shift/serial/repeat from the test-run summary.
@@ -435,6 +469,20 @@ class LiveDisplayScreen(QWidget):
             return
         self._raw_trace.append_samples(values)
         self._fft_trace.append_samples(values, sample_rate_hz=sample_rate_hz)
+        # Keep the rpm buffer in lockstep with the raw sample buffer.
+        # Order spectrum + order tracking need a matched rpm array; if
+        # a chunk carries fewer rpm samples than values (or none) pad
+        # by repeating the last known rpm so the arrays stay aligned.
+        if sample_rate_hz:
+            self._sample_rate_hz = float(sample_rate_hz)
+        rpm_iter = iter(rpm)
+        last_rpm = self._rpm_buffer[-1] if self._rpm_buffer else 0.0
+        for _ in values:
+            try:
+                last_rpm = float(next(rpm_iter))
+            except StopIteration:
+                pass  # fall back to last_rpm
+            self._rpm_buffer.append(last_rpm)
         self._push_computed_from_chunk(values, rpm)
         # Compute STFT + octave bands from the full raw buffer every 4
         # chunks -- roughly one refresh per 400ms wall-clock at the
@@ -443,6 +491,7 @@ class LiveDisplayScreen(QWidget):
         self._chunk_counter = getattr(self, "_chunk_counter", 0) + 1
         if self._chunk_counter % 4 == 0:
             self._refresh_spectrogram(sample_rate_hz)
+            self._refresh_order_analysis()
 
     def _refresh_spectrogram(self, sample_rate_hz: float | None) -> None:
         """Compute STFT + octave bands from the current raw-signal buffer
@@ -465,6 +514,61 @@ class LiveDisplayScreen(QWidget):
             self._octave_plot.set_bands(bands.center_freq_hz, bands.rms)
         except Exception:
             pass
+
+    def _refresh_order_analysis(self) -> None:
+        """Compute order spectrum + per-order tracking from the current
+        raw signal + rpm buffers, push into the two order-domain
+        widgets. Skipped on a too-short buffer (need >= 1024 samples
+        for a meaningful order spectrum) or when rpm never actually
+        changes (angular resampling divides by dtheta which requires
+        a real ramp)."""
+        n = min(len(self._raw_trace._buffer), len(self._rpm_buffer))
+        if n < 1024:
+            return
+        signal = np.asarray(list(self._raw_trace._buffer)[-n:], dtype=float)
+        rpm = np.asarray(list(self._rpm_buffer)[-n:], dtype=float)
+        if rpm.max() - rpm.min() < 1.0:  # constant rpm -- no angular resample
+            return
+        sr = self._sample_rate_hz
+        time_s = np.arange(n) / sr
+
+        # -- Order spectrum --
+        try:
+            os_result = compute_order_spectrum(signal, time_s, rpm, samples_per_rev=180)
+        except Exception:
+            return
+        # Trim the leading DC bin (order 0) so the plot doesn't get
+        # dominated by any mean offset; take up to order 100 for the
+        # visible range (matches the LabVIEW screen's ~130-order cap).
+        keep = (os_result.order > 0.5) & (os_result.order <= 100.0)
+        mag_view = os_result.magnitude[keep]
+        order_view = os_result.order[keep]
+        self._order_spectrum_plot.set_speed_over_time(rpm[::max(1, n // 500)].tolist())
+        self._order_spectrum_plot.set_spectrum(mag_view.tolist())
+        # Top-5 peaks by magnitude.
+        if mag_view.size > 0:
+            top_idx = np.argsort(mag_view)[-5:][::-1]
+            peaks = [(float(order_view[i]), float(mag_view[i])) for i in top_idx]
+            self._order_spectrum_plot.set_peaks(peaks)
+
+        # -- Order tracking (per-order magnitude vs time) --
+        for name, order in _TRACKED_ORDER_SERIES:
+            if order is None:
+                # OVERALL = windowed RMS envelope of the raw signal.
+                window = max(1, n // 100)
+                envelope = [
+                    float(np.sqrt(np.mean(signal[i:i + window] ** 2)))
+                    for i in range(0, n, window)
+                ]
+                self._order_tracking_plot.set_series_data(name, envelope)
+                continue
+            try:
+                ot_result = compute_order_tracking(
+                    signal, time_s, rpm, sample_rate_hz=sr, order=order, nperseg=256,
+                )
+            except Exception:
+                continue
+            self._order_tracking_plot.set_series_data(name, ot_result.magnitude.tolist())
 
     def _push_computed_from_chunk(self, values: list[float], rpm: list[float]) -> None:
         """Compute one sample per stat from this chunk and append to

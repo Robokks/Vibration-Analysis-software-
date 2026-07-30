@@ -6,6 +6,50 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 19:15 UTC — Qt: real Order Spectrum + Order Tracking sub-tabs
+
+User shared two more photos of the real LabVIEW system's Frequency
+Series sub-tabs (ORDER SPECTRUM + ORDER TRACKING). Reproduced both
+in Qt, replacing the last two PlaceholderPanels on the Live Display's
+Frequency-domain tab.
+
+- **OrderSpectrumPlot** widget: two stacked plots matching the
+  LabVIEW screen -- SPEED (rpm) vs TIME on top, magnitude vs ORDER
+  on the bottom, plus a compact PEAKS table showing the top-5
+  magnitude spikes.
+- **OrderTrackingPlot** widget: MultiSeriesPlot with 5 named
+  series (OVERALL + gear-mesh harmonics 12 / 24 / 36 / 48) plus an
+  EXPECTED ORDER info panel on the right listing each labeled
+  order.
+- **Live wiring**: on every 4th signal_chunk, `_refresh_order_analysis`
+  computes both from the raw signal + rpm buffers. Order spectrum
+  uses `analysis_engine.signal.order_spectrum.compute_order_spectrum`
+  (angle-domain resampled FFT, samples_per_rev=180); the per-order
+  tracking magnitudes use
+  `analysis_engine.signal.order_tracking.compute_order_tracking`
+  (STFT with the target bin following order × rpm(t) / 60). OVERALL
+  is a windowed-RMS envelope of the raw signal. Both are gated on
+  a min 1024-sample buffer and a real rpm ramp (dtheta > 0).
+- Added an rpm-buffer deque on LiveDisplayScreen that mirrors the
+  raw-trace buffer sample-for-sample so the order-tracking math has
+  an aligned rpm array to work with (pads by repeating the last
+  known rpm when a chunk's rpm array is shorter than its values).
+- Cleared alongside the other plots on a fresh RUNNING event.
+
+Verified end-to-end against the running backend + simulator: Order
+Spectrum shows the gear R's 12-tooth mesh at order 11.98 with 2x
+at 24.04 and 3x at 36 (matches the seeded model exactly); Order
+Tracking shows 5 stacked Y-axes with OVERALL/12/24/36/48 traces
+plus the EXPECTED ORDER table populated.
+
+Testing: 5 new widget tests
+(`OrderSpectrumPlot.set_speed_and_spectrum`, `.set_peaks_populates_
+table`, `.clear_wipes_state`; `OrderTrackingPlot.multiple_series_
+data_pushes`, `.expected_orders_populates_table`). Full cross-
+package suite: **246/246 passing.**
+
+---
+
 ## 2026-07-30 18:30 UTC — Qt Calibration screen + real live spectrogram plots
 
 After reading the real Vibr-O-Matic Analyzer user's manual (see
