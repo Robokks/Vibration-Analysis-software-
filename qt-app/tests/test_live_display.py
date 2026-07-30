@@ -102,10 +102,10 @@ class LiveDisplayScreenTests:
         assert screen._status_bar.field_text("nvh_id") == "2"  # STYC -> 2
         assert screen._status_bar.field_text("result") == "PASS"
 
-    def test_signal_chunk_updates_raw_and_fft_traces_and_stats(self, qapp):
+    def test_signal_chunk_updates_raw_fft_and_computed_plot(self, qapp):
         screen, _api, live = _make_screen()
-        # Long enough to exercise the LiveStatsPanel (needs >=8 samples)
-        # and the FftTraceWidget (needs >=32 samples).
+        # Long enough to exercise the stat computation (needs >=8) and
+        # the FftTraceWidget (>=32).
         values = [0.5 * ((-1) ** i) for i in range(64)]
         live.emit_event({
             "type": "signal_chunk", "test_run_id": "run-42", "dc_id": "d1",
@@ -116,9 +116,14 @@ class LiveDisplayScreenTests:
         })
         assert len(screen._raw_trace._buffer) == 64
         assert len(screen._fft_trace._buffer) == 64
-        # Stats panel should have swapped its em-dashes for real numbers.
-        assert screen._stats_panel._labels["rms"].text() != "—"
-        assert screen._stats_panel._labels["peak"].text() != "—"
+        # Each of the 8 computed series should have one sample after
+        # one chunk.
+        for name in ("SPEED", "CREST", "PEAK", "RMS", "KURTOSIS", "SKEWNESS", "VARIANCE", "MEAN"):
+            assert len(screen._computed_plot.series_config(name).buffer) == 1
+        # RMS of ±0.5 sample is 0.5; peak is 0.5; crest ~= 1.
+        assert abs(screen._computed_plot.series_config("RMS").buffer[0] - 0.5) < 1e-6
+        assert abs(screen._computed_plot.series_config("PEAK").buffer[0] - 0.5) < 1e-6
+        assert abs(screen._computed_plot.series_config("SPEED").buffer[0] - 1000.0) < 1e-6
 
     def test_running_test_run_clears_previous_traces(self, qapp):
         screen, _api, live = _make_screen()

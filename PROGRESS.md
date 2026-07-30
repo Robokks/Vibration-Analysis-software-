@@ -6,6 +6,49 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 16:30 UTC — Qt Computed sub-tab: multi-Y-axis plot with cursor + config menu
+
+Replaced the numeric-readout `LiveStatsPanel` on the Computed sub-tab
+with a real multi-Y-axis live plot matching the LabVIEW NVH TEST
+SCREEN's COMPUTED view. Eight named series (SPEED / CREST / PEAK /
+RMS / KURTOSIS / SKEWNESS / VARIANCE / MEAN), each with its own
+Y-axis column stacked on the left, all sharing a common time axis
+across the plot area.
+
+- New `MultiSeriesPlot(GraticuleWidget)` widget (~330 lines).
+  Each series has a `SeriesConfig` dataclass with color, visible,
+  autoscale, manual_min/max, line_width, antialiased, and a bounded
+  deque buffer. `push_sample(name, value)` appends + repaints.
+  `contextMenuEvent` builds a QMenu with:
+  - `Plot Visible` submenu (one checkable action per series)
+  - `Line Width` (1 / 1.5 / 2 / 3 px, applied to every series)
+  - `Anti-Aliased` toggle
+  - `X Scale` (disabled -- X is a rolling time buffer today)
+  - `Y Scale` -> per-series submenu with Autoscale toggle + Set
+    Range... (QInputDialog for min/max)
+  - `Cursor Enabled` toggle
+  Widget also handles mouseMoveEvent to update the cursor position
+  and draws a dashed vertical line + pill labels showing each visible
+  series' value at that X.
+- New `PlotLegend(QFrame)` widget: right-side legend with one row
+  per series (color chip + name + visibility QCheckBox). Toggling
+  the checkbox hides/shows the series -- same effect as the plot's
+  Plot Visible submenu, discoverable via a persistent UI element.
+- On every `signal_chunk` event the LiveDisplayScreen now computes
+  RMS/Peak/Crest/Mean/Variance/Skewness/Kurtosis via numpy plus
+  Speed from the chunk's rpm array, and pushes each into the plot.
+  Guards on chunks < 8 samples and std ~ 0.
+- Removed the now-unused `LiveStatsPanel` module.
+- Testing: 8 new tests in `test_multi_series_plot.py` covering
+  buffer growth, unknown-series push, bounded deque behavior,
+  visibility toggle, cursor enable/disable, autoscale range,
+  manual range override, clear(). Existing
+  `test_signal_chunk_updates_...` rewritten to verify the plot's
+  series buffers instead of the removed stats labels. Full
+  cross-package suite: **227/227 passing.**
+
+---
+
 ## 2026-07-30 15:00 UTC — Qt dark/light theme toggle
 
 Runtime dark/light theme switching in the Qt app. The design tokens

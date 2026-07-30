@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
@@ -31,11 +32,12 @@ from ..live_client import LiveClient
 from ..widgets.fft_trace import FftTraceWidget
 from ..widgets.gear_glyph import GearGlyphWidget
 from ..widgets.labels import MonoLabel, SectionTitle
-from ..widgets.live_stats import LiveStatsPanel
 from ..widgets.live_status_bar import LiveStatusBar
 from ..widgets.live_toolbar import LiveToolbar
+from ..widgets.multi_series_plot import MultiSeriesPlot
 from ..widgets.panel import Panel
 from ..widgets.placeholder_panel import PlaceholderPanel
+from ..widgets.plot_legend import PlotLegend
 from ..widgets.signal_trace import SignalTraceWidget
 
 # The seeded dataset has one model/program/gear/direction, so the
@@ -52,6 +54,13 @@ _CHANNEL_NAME = "vib_a"
 _TRACE_MAX_SAMPLES = 4000
 _DEFAULT_STATION = "STN-01"
 _PLACEHOLDER = "—"
+
+# Series shown on the Computed sub-tab's multi-Y-axis plot -- one row
+# per LabVIEW-style stat plus SPEED (rpm) as the process context signal.
+# Order matches the real screen's left-to-right axis column order.
+_COMPUTED_SERIES = (
+    "SPEED", "CREST", "PEAK", "RMS", "KURTOSIS", "SKEWNESS", "VARIANCE", "MEAN",
+)
 
 # LabVIEW PLC boundary: NVH_ID enum for direction (see docs/data-contract).
 _DIRECTION_NVH_ID: dict[str, int] = {"RU": 0, "STYD": 1, "STYC": 2, "RD": 3}
@@ -184,11 +193,21 @@ class LiveDisplayScreen(QWidget):
         self._raw_trace = SignalTraceWidget(max_samples=_TRACE_MAX_SAMPLES)
         self._raw_trace.setMinimumHeight(240)
         tabs.addTab(self._wrap_padded(self._raw_trace), "Raw signal")
-        # Computed
-        self._stats_panel = LiveStatsPanel(
-            muted_color=self._muted, accent_color=self._accent_secondary,
+        # Computed -- multi-Y-axis plot, one series per LabVIEW-style
+        # stat, with a legend on the right for per-series visibility.
+        self._computed_plot = MultiSeriesPlot(list(_COMPUTED_SERIES), max_samples=500)
+        self._computed_plot.setMinimumHeight(240)
+        colors = {name: self._computed_plot.series_config(name).color for name in _COMPUTED_SERIES}
+        self._computed_legend = PlotLegend(
+            list(_COMPUTED_SERIES), colors, self._computed_plot.set_visible,
         )
-        tabs.addTab(self._stats_panel, "Computed")
+        computed_container = QWidget()
+        computed_layout = QHBoxLayout(computed_container)
+        computed_layout.setContentsMargins(12, 12, 12, 12)
+        computed_layout.setSpacing(8)
+        computed_layout.addWidget(self._computed_plot, stretch=1)
+        computed_layout.addWidget(self._computed_legend)
+        tabs.addTab(computed_container, "Computed")
         return tabs
 
     def _build_frequency_domain_tab(self) -> QWidget:
@@ -334,10 +353,10 @@ class LiveDisplayScreen(QWidget):
         self._status_bar.set_field("status", self._test_run_status)
 
         if self._test_run_status == "RUNNING":
-            # Fresh acquisition -- clear the traces and stat panel.
+            # Fresh acquisition -- clear every plot buffer.
             self._raw_trace.clear()
             self._fft_trace.clear()
-            self._stats_panel.clear()
+            self._computed_plot.clear()
             self._status_bar.set_field("result", "PENDING")
 
         # Backfill operator/shift/serial/repeat from the test-run summary.
@@ -382,14 +401,46 @@ class LiveDisplayScreen(QWidget):
     def _handle_signal_chunk(self, payload: dict[str, Any]) -> None:
         self._station_id = payload.get("station_id") or self._station_id
         values = payload.get("values") or []
+        rpm = payload.get("rpm") or []
         sample_rate_hz = payload.get("sample_rate_hz")
         if not values:
             return
         self._raw_trace.append_samples(values)
         self._fft_trace.append_samples(values, sample_rate_hz=sample_rate_hz)
-        # LiveStatsPanel reads from the raw trace's public buffer to
-        # avoid keeping a duplicate rolling window in RAM.
-        self._stats_panel.update_from_buffer(list(self._raw_trace._buffer))
+        self._push_computed_from_chunk(values, rpm)
+
+    def _push_computed_from_chunk(self, values: list[float], rpm: list[float]) -> None:
+        """Compute one sample per stat from this chunk and append to
+        the multi-series plot. Guards against a chunk too small to
+        yield meaningful stats (min 8 samples)."""
+        if len(values) < 8:
+            return
+        arr = np.asarray(values, dtype=float)
+        mean = float(arr.mean())
+        centered = arr - mean
+        variance = float(np.mean(centered * centered))
+        std = variance ** 0.5
+        rms = float(np.sqrt(np.mean(arr * arr)))
+        peak = float(np.max(np.abs(arr)))
+        crest = peak / rms if rms > 0 else 0.0
+        # Skewness and kurtosis (Fisher's excess): guard for std==0.
+        if std > 1e-9:
+            skew = float(np.mean((centered / std) ** 3))
+            kurt = float(np.mean((centered / std) ** 4) - 3.0)
+        else:
+            skew = 0.0
+            kurt = 0.0
+        speed = float(np.mean(np.asarray(rpm, dtype=float))) if rpm else 0.0
+
+        push = self._computed_plot.push_sample
+        push("SPEED", speed)
+        push("CREST", crest)
+        push("PEAK", peak)
+        push("RMS", rms)
+        push("KURTOSIS", kurt)
+        push("SKEWNESS", skew)
+        push("VARIANCE", variance)
+        push("MEAN", mean)
 
     # --- theme -------------------------------------------------------
 
@@ -411,7 +462,10 @@ class LiveDisplayScreen(QWidget):
         self._load_palette()
         self._toolbar.apply_palette(icon_color=self._accent_secondary, muted_color=self._muted)
         self._status_bar.apply_palette(muted_color=self._muted, accent_color=self._accent_secondary)
-        self._stats_panel.apply_palette(muted_color=self._muted, accent_color=self._accent_secondary)
+        # Multi-series plot rereads its palette on the next paint via
+        # GraticuleWidget's own theme_changed subscription -- no extra
+        # apply_palette hop needed.
+        self._computed_plot.update()
         for panel in self._placeholder_panels:
             panel.apply_palette(muted_color=self._muted)
         # Repaint the FFT trace in the new accent color.

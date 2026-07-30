@@ -775,6 +775,83 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — "graph scale configuration / plot configuration / cursor / multiple y scale"
+
+**User** attached two photos of the real LabVIEW system:
+1. The right-click context menu on a plot (Plot Visible / Common
+   Plots / Color / Line Style / Line Width / Anti-Aliased / Bar
+   Plots / Fill Base Line / Interpolation / Point Style / X Scale /
+   Y Scale / Export) plus a legend with MEAN/VARIANCE/SKEWNESS/
+   KURTOSIS/RMS/PEAK/CREST/SPEED checkboxes.
+2. The COMPUTED sub-tab in action, showing eight stacked Y-axis
+   columns each with its own scale range: SPEED (0-500 rpm), CREST
+   (2.6-3.9), PEAK (5.2-8.4), RMS (1-3), KURTOSIS (2.4-6.0),
+   SKEWNESS (-0.8 to 0.5), VARIANCE (0.4-5.2), MEAN (-0.6 to 2.2).
+
+**User's spec (concatenated):** "graph scale configuration / plot
+configuration / cursor configuration with enable, disable, / multiple
+y scale".
+
+**Assistant:** built a real multi-Y-axis plot widget from scratch (no
+external charting library -- QPainter directly, same as the existing
+SignalTraceWidget/FftTraceWidget pattern).
+
+- **`MultiSeriesPlot(GraticuleWidget)`** in `widgets/multi_series_plot.py`.
+  Owns a `dict[str, SeriesConfig]` where each SeriesConfig carries
+  color / visible / autoscale / manual_min/max / line_width /
+  antialiased / a bounded deque buffer. `push_sample(name, value)`
+  appends + triggers a repaint. `paintEvent()` reserves the left
+  N×60px for stacked Y-axis columns (one per visible series), draws
+  a vertical axis line + tick marks + numeric labels + rotated
+  series name (colored to match the series), and paints each trace
+  to the shared plot area on the right with its own y-range mapping.
+- **Right-click config menu** (`contextMenuEvent`): Plot Visible
+  submenu with one checkable action per series; Line Width submenu
+  (1 / 1.5 / 2 / 3 px, applied uniformly); Anti-Aliased toggle;
+  X Scale (disabled today -- X is a rolling time buffer, no manual
+  range yet); Y Scale submenu with per-series Autoscale toggle + Set
+  Range... (QInputDialog for min/max, autoscale flips off on
+  manual entry); Cursor Enabled toggle.
+- **Cursor overlay**: `setMouseTracking(True)` on the widget so
+  mouseMoveEvent fires without a button press. When enabled, draws a
+  dashed vertical line at the cursor X plus pill labels stacked
+  next to it showing each visible series' value at that X (mapped
+  from cursor-x fraction back to a buffer index).
+- **`PlotLegend(QFrame)`**: right-side legend, one row per series
+  with a colored `_ColorChip(QFrame)` + name label + QCheckBox.
+  Toggling the checkbox hides/shows the series (same effect as the
+  context menu's Plot Visible submenu, but visible in the UI at
+  all times).
+- **Series computation**: `_push_computed_from_chunk` in
+  LiveDisplayScreen computes RMS / Peak / Crest / Mean / Variance /
+  Skewness / Kurtosis via numpy on each signal_chunk (Fisher's
+  excess kurtosis; guards std ~ 0 to avoid /0), plus Speed as
+  `mean(rpm)` from the chunk. Pushes each into the plot's matching
+  series.
+- **Cleanup**: removed the now-unused `LiveStatsPanel` widget --
+  its role is entirely replaced by the multi-series plot. Also
+  cleaned up a docstring reference to it in the screen's stat
+  helper.
+
+Testing: 8 new widget tests in `test_multi_series_plot.py` covering
+buffer growth, unknown-series push (no-op), bounded-deque behavior
+(max_samples), visibility flip, cursor enable/disable resetting
+`_cursor_x`, autoscale range with 8% headroom, manual range
+override, clear(). Existing
+`test_signal_chunk_updates_raw_and_fft_traces_and_stats` renamed to
+`..._and_computed_plot` and rewritten to verify each of the 8
+series buffers grew by one sample and the numeric values (RMS,
+PEAK, SPEED) match the expected math for a ±0.5 alternating input
+at 1000 rpm. Full cross-package suite: **227/227 passing.**
+
+Screenshotted against the running backend + simulator: 8 Y-axis
+columns with rotated colored series names on the left, live traces
+in the plot area (SPEED clearly ramping from ~950 to ~1900 rpm as
+the simulator plays back a healthy-unit acquisition), 8-row legend
+on the right with color chips and checkboxes.
+
+Sent to the user, committed, pushed.
+
 ### Turn — "dark mode light mode"
 
 **User:** "dark mode light mode" -- 3 words, requesting runtime theme
