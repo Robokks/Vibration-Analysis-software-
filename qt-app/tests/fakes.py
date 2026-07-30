@@ -18,6 +18,7 @@ class FakeApiClient:
         self.patch_threshold_calls: list[dict[str, Any]] = []
         self.patch_limit_calls: list[dict[str, Any]] = []
         self.patch_table_config_calls: list[dict[str, Any]] = []
+        self.patch_calibration_calls: list[dict[str, Any]] = []
 
     def _respond(self, key: str, on_success, on_error) -> None:
         if key in self._fail:
@@ -102,6 +103,21 @@ class FakeApiClient:
                 "threshold_low": None, "threshold_high": None,
                 "included_in_table_config": False,
             }
+        on_success(response)
+
+    def fetch_calibration(self, model_id, channel_name, on_success, on_error) -> None:
+        self._respond("fetch_calibration", on_success, on_error)
+
+    def patch_calibration(self, model_id, channel_name, payload, on_success, on_error) -> None:
+        self.patch_calibration_calls.append({
+            "model_id": model_id, "channel_name": channel_name, **payload,
+        })
+        if "patch_calibration" in self._fail:
+            on_error("stubbed failure for patch_calibration")
+            return
+        response = self._responses.get("patch_calibration")
+        if response is None:
+            response = {"model_id": model_id, "channel_name": channel_name, **payload}
         on_success(response)
 
     def patch_table_config_parameter(

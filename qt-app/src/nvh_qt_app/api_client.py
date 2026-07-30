@@ -187,6 +187,25 @@ class ApiClient:
         body = {"limit_low": limit_low, "limit_high": limit_high}
         self._patch(path, body, on_success, on_error, params)
 
+    def fetch_calibration(
+        self, model_id: str, channel_name: str, on_success: OnSuccess, on_error: OnError,
+    ) -> None:
+        self._get(
+            f"/models/{quote(model_id)}/calibrations/{quote(channel_name)}",
+            on_success, on_error,
+        )
+
+    def patch_calibration(
+        self,
+        model_id: str,
+        channel_name: str,
+        payload: dict[str, Any],
+        on_success: OnSuccess,
+        on_error: OnError,
+    ) -> None:
+        path = f"/models/{quote(model_id)}/calibrations/{quote(channel_name)}"
+        self._patch(path, payload, on_success, on_error, params=None)
+
     def patch_table_config_parameter(
         self,
         model_id: str,

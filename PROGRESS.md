@@ -6,6 +6,58 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 18:30 UTC — Qt Calibration screen + real live spectrogram plots
+
+After reading the real Vibr-O-Matic Analyzer user's manual (see
+`vom_manual.txt` in scratchpad), tackled two of the missing pieces
+the manual documents:
+
+**Calibration screen** (matches section 7 of the manual):
+- New `CalibrationRow` (per model × channel) with sensor_sensitivity_
+  mv_per_eu / engineering_units / db_reference_eu / custom_label /
+  weighting_filter / pregain_db + last_calibrated_at / due_at audit.
+  Default values match the manual (1000 mV/EU, V, 1.0, EU, linear, 0 dB).
+- New GET + PATCH `/models/{model_id}/calibrations/{channel_name}`
+  endpoints on the models router; GET seeds defaults on first read
+  so a fresh model works without a separate seed step.
+- New `CalibrationOut` + `CalibrationUpdate` pydantic schemas.
+- New `CalibrationScreen` (Qt) with the full manual field set:
+  spinboxes for sensitivity/dB reference/pregain, combos for
+  engineering units + weighting filter, a Save button that stamps
+  last_calibrated_at (now) + due_at (12 months out). Added as the
+  4th nav tab in the MainWindow.
+
+**Real live spectrogram / octave plots** (replacing 4 placeholders):
+- Reused the analysis_engine's existing `signal.stft.compute_spectrogram`
+  and `signal.octave.compute_octave_bands` -- both were already
+  implemented, just not wired into the Qt Live Display.
+- New `ColorMapPlot(GraticuleWidget)` -- 2D heatmap of |STFT| with
+  frequency on Y (0-2.5k Hz) and time on X, painted via QImage with
+  a viridis 6-stop LUT. Autoscaled to peak.
+- New `WaterfallPlot(GraticuleWidget)` -- N stacked spectrum slices
+  from the same matrix, painted with vertical offset + alpha fade
+  toward older frames. Classic waterfall projection.
+- New `OctaveBarsPlot(GraticuleWidget)` -- ISO 31.5/63/125/.../8k Hz
+  band-energy bars, with band-center labels along the X-axis.
+- Cascade uses the WaterfallPlot widget for this pass (same data,
+  same projection -- extend later if we want a variant orientation).
+- Live wiring: on every 4th signal_chunk, recompute STFT (nperseg
+  256, noverlap 128) and octave bands from the raw-buffer contents,
+  push into all four plots. Guarded on min 512 samples so the STFT
+  has at least one full window.
+- Order spectrum + Order tracking stay as PlaceholderPanels (they
+  need angular resampling by tach, which is batch-computed today).
+
+Testing: 3 new backend tests for the calibration endpoint
+(seeds-defaults, persists-across-fresh-get, unknown-model 404); 3
+new Qt tests for the Calibration screen (form populates, save
+dispatches with form values, save failure re-enables); 5 new tests
+for the spectrogram widgets (setters accept expected shapes,
+clear resets). Updated the app-smoke test for 4 screens instead of
+3. Full cross-package suite: **241/241 passing.**
+
+---
+
 ## 2026-07-30 17:15 UTC — Qt Reports: plots on Consolidated + Summary tabs
 
 Extended the multi-Y-axis plot pattern into the Reports screen:

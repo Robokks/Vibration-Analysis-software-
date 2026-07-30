@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..screens.calibration import CalibrationScreen
 from ..screens.live_display import LiveDisplayScreen
 from ..screens.master_entry import MasterEntryScreen
 from ..screens.reports import ReportsScreen
@@ -30,6 +31,7 @@ _SCREENS = [
     ("Live Display", LiveDisplayScreen),
     ("Master Entry", MasterEntryScreen),
     ("Reports", ReportsScreen),
+    ("Calibration", CalibrationScreen),
 ]
 
 

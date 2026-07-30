@@ -775,6 +775,112 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — reference doc: "check this document" / "1 & 3"
+
+**User** attached the real system's `Vibr-O-Matic Analyzer Software
+User's Manual.docx` (114 embedded figures, ~10 MB) and asked me to
+check it.
+
+**Assistant:** couldn't use pandoc (not installed) or LibreOffice's
+soffice.py (Java missing), so unpacked the docx directly (it's a ZIP)
+and walked `word/document.xml` for the text. Extracted 743 paragraphs
+(~31 KB) with a small ElementTree helper.
+
+Read the manual end-to-end and built a gap-analysis reply
+comparing what we have vs. what the manual documents. Key findings:
+
+- Nine top-level screens the manual describes: Login, Configuration,
+  Calibration, Setup (Full Scale + Master Record + Limits), Memory
+  Analyze, Consolidated Report, Detailed Report, Summary, Master,
+  Master Setup, System Configuration (Workorder + Users + Access +
+  Networking + Memory + Path).
+- Bottom status bar with 9 fields (Op / Shift / Model / SN / Rep /
+  Gear / NVH state / Gear shift / SFQ result / NVH result) --
+  near-exact match to what we've built.
+- G-grade formula from the manual `G5% = (max_band-min_band)/2 *
+  full_scale/100` confirmed the Phase B/C implementation is correct.
+- Vocabulary matches verbatim (RMS/Peak/Crest/Mean/Variance/Skewness/
+  Kurtosis on Time series; FFT/Order spectrum/Order tracking/
+  Waterfall/Cascade/Colormap/Octave on Frequency series).
+
+Listed 12 gaps that we haven't built yet (Calibration screen, Setup
+screen, Waterfall/Cascade/Colormap/Octave real plots, Speed Series
+tab, System Configuration, Memory Analyze, HTML/PDF export, Set
+Program/Set Master buttons, Sensor database, Truncation modes,
+Remarks window, PC/Controller MAC validation).
+
+**User:** "1 & 3" -- pick Calibration screen + the 4 real
+Waterfall/Cascade/Colormap/Octave plots.
+
+**Assistant:** did both. Phase 1 = Calibration:
+
+- `CalibrationRow` DB model with the manual's field set (sensor
+  sensitivity mV/EU, engineering units, dB reference, custom label,
+  weighting filter, pregain dB) + audit timestamps.
+- `CalibrationOut` / `CalibrationUpdate` pydantic schemas.
+- Backend GET + PATCH endpoints on models router; GET seeds
+  the manual's defaults on first read so a fresh model doesn't need
+  a separate seed step.
+- `CalibrationScreen` Qt widget: full form with QDoubleSpinBox for
+  the numeric fields, QComboBox for engineering-units and
+  weighting-filter, a Summary section showing last-calibrated /
+  due-date, and a Save button that stamps `last_calibrated_at`
+  (now UTC) + `due_at` (12 months from now, matching the manual's
+  implicit annual recalibration convention). Added as 4th nav tab
+  in the MainWindow.
+
+Phase 2 = the four freq-domain plot widgets:
+
+- Noticed the analysis engine already had `signal.stft.compute_
+  spectrogram` and `signal.octave.compute_octave_bands` --
+  implemented long ago but never wired to the Qt Live Display
+  (task #76 was already done in essence).
+- `ColorMapPlot(GraticuleWidget)`: 2D heatmap of |STFT|. Uses
+  QImage.Format_RGBA8888 with a viridis 6-stop LUT built once at
+  import (piecewise-linear interp between purple/teal/yellow stops
+  quantized to 256 colors). Frequency on Y (label formatted `_format_hz`
+  as `2.5k` or `500` etc.), time on X (with `.2fs`), autoscaled to
+  peak. Flipped vertically so low freq sits at the bottom.
+- `WaterfallPlot`: same STFT matrix rendered as N stacked spectrum
+  slices, painted via QPainter.drawPolyline with alpha fading toward
+  the oldest frame. Subsamples to max 20 frames to keep it visually
+  clean.
+- `OctaveBarsPlot`: vertical bar chart at ISO octave center
+  frequencies (31.5/63/125/250/500/1k/2k/4k/8k Hz), autoscaled to
+  peak, band-center labels along X.
+- Cascade uses the WaterfallPlot widget for this pass -- both are
+  projections of the same STFT matrix; adding a variant projection
+  is a follow-up.
+- Live wiring: `_refresh_spectrogram` in LiveDisplayScreen runs
+  every 4th signal_chunk (~400ms wall-clock at simulator's 10
+  chunks/sec pace), computes STFT (nperseg 256, noverlap 128) +
+  octave bands from the raw-buffer contents, pushes into all four
+  plots. Guarded on min 512 samples so STFT has one full window.
+- Only Order spectrum + Order tracking stay as PlaceholderPanels --
+  both need angular resampling by a tach signal, which is currently
+  batch-computed and not part of the live stream.
+
+Testing: 3 new backend tests for the calibration endpoint (seeds
+defaults, persists across a fresh GET, unknown-model 404); 3 new
+Qt widget tests for the Calibration screen (form populates from
+API, Save dispatches PATCH with the current form values, save
+failure re-enables the button and surfaces error); 5 new tests for
+the spectrogram widgets (setters accept expected shapes, clear
+resets). Updated the app-smoke test for 4 screens instead of 3.
+Full cross-package suite: **241/241 passing.**
+
+Screenshotted the Calibration screen (loaded with manual defaults)
+and all five real freq-domain sub-tabs (FFT / Color map / Waterfall
+/ Cascade / Octave). The Color map clearly shows the simulator's
+dominant gear-mesh fundamental as a bright green band low in the
+frequency range; Waterfall shows the same as 3 harmonic peaks
+(1x / 2x / 3x) with the classic alpha-faded 3D projection; Octave
+shows the 250 Hz band dominating (matches the simulator's gear-mesh
+frequency for a 12-tooth gear at ~1000-2500 rpm).
+
+Sent to the user, updated PROGRESS.md, wrote this transcript entry,
+committed, pushed.
+
 ### Turn — "update to report also"
 
 **User:** "update to report aslo" -- extend the multi-Y-axis plot

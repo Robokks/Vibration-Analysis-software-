@@ -54,3 +54,34 @@ class TableConfigParameterUpdate(BaseModel):
     Idempotent by design."""
 
     included: bool
+
+
+class CalibrationOut(BaseModel):
+    """Sensor calibration state for one (model, channel) -- matches the
+    real Vibr-O-Matic Analyzer's Calibration window field set."""
+
+    model_id: str
+    channel_name: str
+    sensor_sensitivity_mv_per_eu: float
+    engineering_units: str
+    db_reference_eu: float
+    custom_label: str
+    weighting_filter: str
+    pregain_db: float
+    last_calibrated_at: str | None = None
+    due_at: str | None = None
+
+
+class CalibrationUpdate(BaseModel):
+    """Body for the PATCH /models/{model_id}/calibrations/{channel_name}
+    endpoint. All fields required -- the frontend sends the full state
+    every save, matching the LabVIEW screen's single Save button."""
+
+    sensor_sensitivity_mv_per_eu: float
+    engineering_units: str
+    db_reference_eu: float
+    custom_label: str
+    weighting_filter: str
+    pregain_db: float
+    last_calibrated_at: str | None = None
+    due_at: str | None = None

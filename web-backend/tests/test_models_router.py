@@ -210,3 +210,42 @@ def test_patch_table_config_rejects_missing_body_field(client, seeded_db):
         json={},  # missing 'included'
     )
     assert response.status_code == 422
+
+
+# ---- Calibration --------------------------------------------------------
+
+
+def test_get_calibration_seeds_defaults_on_first_read(client, seeded_db):
+    _, summary = seeded_db
+    response = client.get(f"/models/{summary['model_id']}/calibrations/vib_a")
+    assert response.status_code == 200
+    body = response.json()
+    # Defaults straight from the LabVIEW manual.
+    assert body["sensor_sensitivity_mv_per_eu"] == 1000.0
+    assert body["engineering_units"] == "V"
+    assert body["db_reference_eu"] == 1.0
+    assert body["weighting_filter"] == "linear"
+    assert body["pregain_db"] == 0.0
+
+
+def test_patch_calibration_persists_across_a_fresh_get(client, seeded_db):
+    _, summary = seeded_db
+    payload = {
+        "sensor_sensitivity_mv_per_eu": 100.0, "engineering_units": "g",
+        "db_reference_eu": 1.0, "custom_label": "EU", "weighting_filter": "A",
+        "pregain_db": 6.0, "last_calibrated_at": "2026-07-30T00:00:00Z",
+        "due_at": "2027-07-30",
+    }
+    patch = client.patch(f"/models/{summary['model_id']}/calibrations/vib_a", json=payload)
+    assert patch.status_code == 200
+    assert patch.json()["sensor_sensitivity_mv_per_eu"] == 100.0
+
+    refreshed = client.get(f"/models/{summary['model_id']}/calibrations/vib_a").json()
+    assert refreshed["engineering_units"] == "g"
+    assert refreshed["weighting_filter"] == "A"
+    assert refreshed["due_at"] == "2027-07-30"
+
+
+def test_get_calibration_unknown_model_returns_404(client):
+    response = client.get("/models/NO-SUCH-MODEL/calibrations/vib_a")
+    assert response.status_code == 404

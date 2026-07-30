@@ -18,6 +18,8 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from analysis_engine.signal.octave import STANDARD_OCTAVE_CENTERS_HZ, compute_octave_bands
+from analysis_engine.signal.stft import compute_spectrogram
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
@@ -39,6 +41,7 @@ from ..widgets.panel import Panel
 from ..widgets.placeholder_panel import PlaceholderPanel
 from ..widgets.plot_legend import PlotLegend
 from ..widgets.signal_trace import SignalTraceWidget
+from ..widgets.spectrogram_plots import ColorMapPlot, OctaveBarsPlot, WaterfallPlot
 
 # The seeded dataset has one model/program/gear/direction, so the
 # parameter table's fetch key is fixed here -- same demo constants as
@@ -217,17 +220,38 @@ class LiveDisplayScreen(QWidget):
         self._fft_trace = FftTraceWidget(max_samples=_TRACE_MAX_SAMPLES)
         self._fft_trace.setMinimumHeight(240)
         tabs.addTab(self._wrap_padded(self._fft_trace), "FFT")
-        # Placeholders -- see PlaceholderPanel's own docstring for why.
+
+        # Color map + Waterfall + Cascade share one STFT computation --
+        # rendered as three different projections of the same matrix.
+        self._colormap_plot = ColorMapPlot()
+        self._colormap_plot.setMinimumHeight(240)
+        tabs.addTab(self._wrap_padded(self._colormap_plot), "Color map")
+
+        self._waterfall_plot = WaterfallPlot()
+        self._waterfall_plot.setMinimumHeight(240)
+        tabs.addTab(self._wrap_padded(self._waterfall_plot), "Waterfall")
+
+        # Cascade is the same STFT projected the same way as waterfall,
+        # historically drawn with a different orientation. Reuse the
+        # widget for the demo -- extend later if we want a variant.
+        self._cascade_plot = WaterfallPlot()
+        self._cascade_plot.setMinimumHeight(240)
+        tabs.addTab(self._wrap_padded(self._cascade_plot), "Cascade")
+
+        # Octave: 1/3-octave center-frequency band-energy bars.
+        self._octave_plot = OctaveBarsPlot()
+        self._octave_plot.setMinimumHeight(240)
+        tabs.addTab(self._wrap_padded(self._octave_plot), "Octave")
+
+        # Only Order spectrum + Order tracking stay placeholders --
+        # they need order tracking (angular resampling by tach), which
+        # is batch-computed today.
         self._placeholder_panels: list[PlaceholderPanel] = []
         for label, detail in (
             ("Order spectrum",
              "Batch-computed from a completed DC record. Add live order tracking to the analysis engine to wire this up."),
             ("Order tracking",
              "Batch-computed from a completed DC record. Needs live tach-based rpm/order tracking."),
-            ("Color map",
-             "Batch STFT over the DC record. Not streamed today."),
-            ("Waterfall",
-             "3D magnitude vs. frequency vs. time. Batch-computed from the DC record."),
         ):
             panel = PlaceholderPanel(label, detail, muted_color=self._muted)
             self._placeholder_panels.append(panel)
@@ -357,6 +381,10 @@ class LiveDisplayScreen(QWidget):
             self._raw_trace.clear()
             self._fft_trace.clear()
             self._computed_plot.clear()
+            self._colormap_plot.clear()
+            self._waterfall_plot.clear()
+            self._cascade_plot.clear()
+            self._octave_plot.clear()
             self._status_bar.set_field("result", "PENDING")
 
         # Backfill operator/shift/serial/repeat from the test-run summary.
@@ -408,6 +436,35 @@ class LiveDisplayScreen(QWidget):
         self._raw_trace.append_samples(values)
         self._fft_trace.append_samples(values, sample_rate_hz=sample_rate_hz)
         self._push_computed_from_chunk(values, rpm)
+        # Compute STFT + octave bands from the full raw buffer every 4
+        # chunks -- roughly one refresh per 400ms wall-clock at the
+        # simulator's 10 chunks/sec pace. Anything faster is wasted
+        # since the user can't perceive it.
+        self._chunk_counter = getattr(self, "_chunk_counter", 0) + 1
+        if self._chunk_counter % 4 == 0:
+            self._refresh_spectrogram(sample_rate_hz)
+
+    def _refresh_spectrogram(self, sample_rate_hz: float | None) -> None:
+        """Compute STFT + octave bands from the current raw-signal buffer
+        and push into the frequency-domain widgets. Guarded on a minimum
+        buffer size so the STFT has at least one full window per call."""
+        buffer = list(self._raw_trace._buffer)
+        if len(buffer) < 512:
+            return
+        sr = sample_rate_hz or 5000.0
+        arr = np.asarray(buffer, dtype=float)
+        try:
+            spec = compute_spectrogram(arr, sample_rate_hz=sr, nperseg=256, noverlap=128)
+        except Exception:
+            return
+        self._colormap_plot.set_spectrogram(spec.magnitude, spec.time_s, spec.freq)
+        self._waterfall_plot.set_spectrogram(spec.magnitude, spec.time_s, spec.freq)
+        self._cascade_plot.set_spectrogram(spec.magnitude, spec.time_s, spec.freq)
+        try:
+            bands = compute_octave_bands(arr, sample_rate_hz=sr, centers_hz=STANDARD_OCTAVE_CENTERS_HZ)
+            self._octave_plot.set_bands(bands.center_freq_hz, bands.rms)
+        except Exception:
+            pass
 
     def _push_computed_from_chunk(self, values: list[float], rpm: list[float]) -> None:
         """Compute one sample per stat from this chunk and append to

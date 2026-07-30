@@ -167,6 +167,32 @@ class TableConfigParameterRow(Base):
     updated_at = Column(String, nullable=False)
 
 
+class CalibrationRow(Base):
+    """One row per (model, channel) recording the sensor calibration
+    state the operator entered on the Calibration screen -- matches the
+    real Vibr-O-Matic Analyzer's Calibration window field-for-field
+    (sensor sensitivity, engineering units, dB reference, weighting
+    filter, pregain) plus a last-calibrated / due-date audit pair."""
+
+    __tablename__ = "calibrations"
+
+    model_id = Column(String, ForeignKey("models.model_id"), primary_key=True)
+    channel_name = Column(String, primary_key=True)
+    # Manual defaults: sensitivity 1000.00 mV/EU, engineering_units "V",
+    # db_reference 1.0, weighting_filter "linear", pregain 0.0 dB.
+    sensor_sensitivity_mv_per_eu = Column(Float, nullable=False, default=1000.0)
+    engineering_units = Column(String, nullable=False, default="V")
+    db_reference_eu = Column(Float, nullable=False, default=1.0)
+    custom_label = Column(String, nullable=False, default="EU")
+    weighting_filter = Column(String, nullable=False, default="linear")
+    pregain_db = Column(Float, nullable=False, default=0.0)
+    # ISO 8601 timestamps. Due date is a calendar date (`YYYY-MM-DD`) but
+    # stored as a string too for consistency with the other timestamps.
+    last_calibrated_at = Column(String, nullable=True)
+    due_at = Column(String, nullable=True)
+    updated_at = Column(String, nullable=False)
+
+
 def make_engine(db_url: str):
     return create_engine(db_url)
 

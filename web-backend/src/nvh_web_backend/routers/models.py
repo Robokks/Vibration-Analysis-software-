@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from nvh_api_schemas.catalog import (
+    CalibrationOut,
+    CalibrationUpdate,
     LimitConfigLimitUpdate,
     LimitConfigThresholdUpdate,
     ParameterCatalogRowOut,
@@ -15,8 +17,10 @@ from sqlalchemy.orm import Session
 
 from nvh_web_backend.adapters import model_row_to_model
 from nvh_web_backend.catalog_service import (
+    get_or_create_calibration,
     parameter_catalog_rows,
     set_table_config_parameter,
+    update_calibration,
     update_limit_config_limit,
     update_limit_config_threshold,
 )
@@ -145,6 +149,61 @@ def update_table_config_parameter(
     if not ok:
         raise HTTPException(status_code=404, detail=f"unknown stat_name {stat_name!r}")
     return _refreshed_row(session, model_id, program_name, gear_label, direction, channel_name, stat_name)
+
+
+@router.get("/models/{model_id}/calibrations/{channel_name}")
+def get_calibration(
+    model_id: str,
+    channel_name: str,
+    session: Session = Depends(get_session),
+) -> CalibrationOut:
+    """Returns the (model, channel) calibration state, seeding the row
+    with the LabVIEW manual's default values (1000 mV/EU, V, 1.0 dB
+    ref, linear, 0 dB pregain) on first read so a fresh model doesn't
+    need a separate calibration-seed step."""
+    _load_model_row(session, model_id)
+    row = get_or_create_calibration(
+        session, model_id, channel_name, updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    return CalibrationOut(
+        model_id=row.model_id, channel_name=row.channel_name,
+        sensor_sensitivity_mv_per_eu=row.sensor_sensitivity_mv_per_eu,
+        engineering_units=row.engineering_units,
+        db_reference_eu=row.db_reference_eu,
+        custom_label=row.custom_label,
+        weighting_filter=row.weighting_filter,
+        pregain_db=row.pregain_db,
+        last_calibrated_at=row.last_calibrated_at,
+        due_at=row.due_at,
+    )
+
+
+@router.patch("/models/{model_id}/calibrations/{channel_name}")
+def patch_calibration(
+    model_id: str,
+    channel_name: str,
+    body: CalibrationUpdate = Body(...),
+    session: Session = Depends(get_session),
+) -> CalibrationOut:
+    """Persist the operator's calibration form -- writes every field on
+    a Save. Matches the LabVIEW screen's single-Save behavior."""
+    _load_model_row(session, model_id)
+    row = update_calibration(
+        session, model_id, channel_name,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        **body.model_dump(),
+    )
+    return CalibrationOut(
+        model_id=row.model_id, channel_name=row.channel_name,
+        sensor_sensitivity_mv_per_eu=row.sensor_sensitivity_mv_per_eu,
+        engineering_units=row.engineering_units,
+        db_reference_eu=row.db_reference_eu,
+        custom_label=row.custom_label,
+        weighting_filter=row.weighting_filter,
+        pregain_db=row.pregain_db,
+        last_calibrated_at=row.last_calibrated_at,
+        due_at=row.due_at,
+    )
 
 
 def _missing_limit_config_detail(

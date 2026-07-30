@@ -11,7 +11,9 @@ from analysis_engine.grading.parameters import PARAMETER_CATALOG
 from analysis_engine.reports.table_config import TableConfig, TableConfigStep
 from nvh_api_schemas.catalog import ParameterCatalogRowOut
 from nvh_api_schemas.report import MasterSignatureStatsOut
-from nvh_contract.db import LimitConfigRow, MasterSignatureRow, TableConfigParameterRow, TableConfigStepRow
+from nvh_contract.db import (
+    CalibrationRow, LimitConfigRow, MasterSignatureRow, TableConfigParameterRow, TableConfigStepRow,
+)
 from sqlalchemy.orm import Session
 
 
@@ -192,6 +194,52 @@ def update_limit_config_limit(
         return None
     row.limit_low = limit_low
     row.limit_high = limit_high
+    row.updated_at = updated_at
+    session.commit()
+    return row
+
+
+def get_or_create_calibration(
+    session: Session, model_id: str, channel_name: str, updated_at: str,
+) -> CalibrationRow:
+    """Fetch the (model, channel) calibration row, creating one with
+    the manual's default values if none exists yet. Lets the frontend
+    GET the endpoint on a fresh model without a separate seed step."""
+    row = session.get(CalibrationRow, (model_id, channel_name))
+    if row is not None:
+        return row
+    row = CalibrationRow(
+        model_id=model_id,
+        channel_name=channel_name,
+        sensor_sensitivity_mv_per_eu=1000.0,
+        engineering_units="V",
+        db_reference_eu=1.0,
+        custom_label="EU",
+        weighting_filter="linear",
+        pregain_db=0.0,
+        last_calibrated_at=None,
+        due_at=None,
+        updated_at=updated_at,
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def update_calibration(
+    session: Session,
+    model_id: str,
+    channel_name: str,
+    updated_at: str,
+    **fields,
+) -> CalibrationRow:
+    """PATCH-shaped writer: full row replace for the six form fields +
+    the two audit timestamps. Creates the row if it doesn't exist yet
+    (matches the LabVIEW screen's Save button which always persists)."""
+    row = get_or_create_calibration(session, model_id, channel_name, updated_at)
+    for key, value in fields.items():
+        if hasattr(row, key):
+            setattr(row, key, value)
     row.updated_at = updated_at
     session.commit()
     return row
