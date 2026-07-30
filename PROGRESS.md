@@ -6,6 +6,39 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 15:00 UTC — Qt dark/light theme toggle
+
+Runtime dark/light theme switching in the Qt app. The design tokens
+already carried two palettes (`dark` = the cyan-on-black operator
+theme, `print` = a fully-specified light palette originally for PDF
+report output, reused here as the "light" mode). What was missing was
+a way to flip between them without restarting.
+
+- New `ThemeManager(QObject)` (`nvh_qt_app.theme_manager`) attached
+  to the QApplication as `.theme`. Exposes `palette_name`,
+  `palette`, `toggle()`, and `theme_changed(str)` signal.
+- New "Dark"/"Light" toggle button in the HeaderBar (top-right,
+  bordered pill styled via QSS). Button label shows the palette a
+  click will switch TO, matching the OS convention.
+- App-level `setStyleSheet(build_stylesheet(new_name))` on every
+  toggle so all type-selector QSS refreshes automatically.
+- Widgets with inline styles gained `apply_palette(...)` methods and
+  the screens cascade to their children on `theme_changed`:
+  `LiveToolbar` (rebuilds icons at the new stroke color +
+  per-button QSS), `LiveStatusBar` (rich-text rebuild),
+  `LiveStatsPanel`, `PlaceholderPanel`, `_InTableToggle`.
+  `LiveDisplayScreen` also repaints the FFT trace pen color and
+  re-applies pass/alarm hex to any already-stamped Result cells
+  (cached per-row so the flip doesn't lose them).
+- `GraticuleWidget` reads its background from the current palette
+  (used to hardcode `dark.background`) and subscribes to
+  `theme_changed` so plots repaint on flip.
+- Testing: 4 new tests (`test_theme_toggle.py`) cover manager
+  start/toggle/label + HeaderBar's toggle button flipping the app
+  theme. Full cross-package suite: **219/219 passing.**
+
+---
+
 ## 2026-07-30 14:20 UTC — Qt Live Display: bottom table -> (gear x direction) results grid
 
 User shared a photo of the real LabVIEW NVH TEST SCREEN.vi to clarify

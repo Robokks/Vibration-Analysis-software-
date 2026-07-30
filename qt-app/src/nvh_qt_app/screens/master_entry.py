@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
-    QHBoxLayout, QHeaderView, QLineEdit, QTableWidget, QTableWidgetItem,
+    QApplication, QHBoxLayout, QHeaderView, QLineEdit, QTableWidget, QTableWidgetItem,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -57,10 +57,7 @@ class MasterEntryScreen(QWidget):
         # trip can restore the pre-edit cell value on failure and keep the
         # "other" column's number when only one column changes.
         self._rows_by_stat: dict[str, dict] = {}
-        palette = load_tokens()["color"]["palettes"]["dark"]
-        self._pass_color = palette["pass"]
-        self._alarm_color = palette["alarm"]
-        self._muted_color = palette["secondaryText"]
+        self._load_palette()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -73,6 +70,11 @@ class MasterEntryScreen(QWidget):
         layout.addWidget(self._build_direction_panel())
         layout.addWidget(self._build_parameter_panel())
         layout.addStretch(1)
+
+        app = QApplication.instance()
+        theme = getattr(app, "theme", None) if app is not None else None
+        if theme is not None:
+            theme.theme_changed.connect(self._on_theme_changed)
 
         self._api.fetch_model(MODEL_ID, self._on_model, self._on_error)
         self._api.fetch_parameters(
@@ -285,6 +287,28 @@ class MasterEntryScreen(QWidget):
         self._error_shown = True
         self._status.setText(f"failed to reach backend: {message}")
 
+    # --- theme -------------------------------------------------------
+
+    def _load_palette(self) -> None:
+        app = QApplication.instance()
+        theme = getattr(app, "theme", None) if app is not None else None
+        palette_name = theme.palette_name if theme is not None else "dark"
+        palette = load_tokens()["color"]["palettes"][palette_name]
+        self._pass_color = palette["pass"]
+        self._alarm_color = palette["alarm"]
+        self._muted_color = palette["secondaryText"]
+
+    def _on_theme_changed(self, _palette_name: str) -> None:
+        self._load_palette()
+        # Refresh every In-table toggle button in the current parameter
+        # table. Threshold/limit editors use type-selector QSS so the
+        # app-level setStyleSheet() refresh already handled them.
+        table = self._param_table
+        for r in range(table.rowCount()):
+            widget = table.cellWidget(r, _COL_IN_TABLE)
+            if isinstance(widget, _InTableToggle):
+                widget.apply_palette(self._pass_color, self._muted_color)
+
 
 class _NumericEditor(QLineEdit):
     """Inline QLineEdit for a single editable LIMIT or THRESHOLD cell --
@@ -362,17 +386,10 @@ class _InTableToggle(QToolButton):
         # doesn't recursively re-fire toggled_by_user.
         self.blockSignals(True)
         self.setChecked(included)
-        self.setText("yes" if included else "no")
-        color = self._pass_color if included else self._muted_color
-        self.setStyleSheet(
-            "QToolButton { "
-            f"color: {color}; "
-            "border: none; padding: 4px 12px; font-family: 'IBM Plex Mono', monospace; "
-            "font-size: 11px; }"
-        )
+        self._paint()
         self.blockSignals(False)
 
-    def _on_clicked(self) -> None:
+    def _paint(self) -> None:
         included = self.isChecked()
         self.setText("yes" if included else "no")
         color = self._pass_color if included else self._muted_color
@@ -382,4 +399,12 @@ class _InTableToggle(QToolButton):
             "border: none; padding: 4px 12px; font-family: 'IBM Plex Mono', monospace; "
             "font-size: 11px; }"
         )
-        self.toggled_by_user.emit(self._stat_name, included)
+
+    def apply_palette(self, pass_color: str, muted_color: str) -> None:
+        self._pass_color = pass_color
+        self._muted_color = muted_color
+        self._paint()
+
+    def _on_clicked(self) -> None:
+        self._paint()
+        self.toggled_by_user.emit(self._stat_name, self.isChecked())

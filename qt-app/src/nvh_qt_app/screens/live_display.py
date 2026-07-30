@@ -20,7 +20,7 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem,
+    QApplication, QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem,
     QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -86,12 +86,11 @@ class LiveDisplayScreen(QWidget):
         api_client: ApiClient | None = None,
     ) -> None:
         super().__init__(parent)
-        palette = load_tokens()["color"]["palettes"]["dark"]
-        self._accent_primary = palette["accentPrimary"]
-        self._accent_secondary = palette["accentSecondary"]
-        self._muted = palette["secondaryText"]
-        self._pass = palette["pass"]
-        self._alarm = palette["alarm"]
+        # Read colors from the current global theme -- when the user
+        # flips dark/light via the header toggle the ThemeManager emits
+        # theme_changed and this screen cascades apply_palette() to every
+        # child widget that has inline styles.
+        self._load_palette()
 
         # --- state --------------------------------------------------
         self._station_id = _DEFAULT_STATION
@@ -100,6 +99,9 @@ class LiveDisplayScreen(QWidget):
         # (gear_label, direction) -> row index in the results table, so a
         # dc event can find the right row in O(1) without walking cells.
         self._row_index: dict[tuple[str, str], int] = {}
+        # (gear_label, direction) -> stamp last painted, so a palette
+        # flip can re-color Result cells with the fresh pass/alarm hex.
+        self._row_stamp: dict[tuple[str, str], str] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -163,6 +165,16 @@ class LiveDisplayScreen(QWidget):
         self._client.on_status = self._on_status
         self._client.start()
 
+        # Subscribe to global palette flips so this screen (and its
+        # inline-styled children) can refresh alongside the app-level
+        # setStyleSheet. Guarded because tests build MainWindow which
+        # auto-attaches a theme; standalone screen tests get the same
+        # via app_shell's fallback attach path.
+        app = QApplication.instance()
+        theme = getattr(app, "theme", None) if app is not None else None
+        if theme is not None:
+            theme.theme_changed.connect(self._on_theme_changed)
+
     # --- tab builders -----------------------------------------------
 
     def _build_time_series_tab(self) -> QWidget:
@@ -187,6 +199,7 @@ class LiveDisplayScreen(QWidget):
         self._fft_trace.setMinimumHeight(240)
         tabs.addTab(self._wrap_padded(self._fft_trace), "FFT")
         # Placeholders -- see PlaceholderPanel's own docstring for why.
+        self._placeholder_panels: list[PlaceholderPanel] = []
         for label, detail in (
             ("Order spectrum",
              "Batch-computed from a completed DC record. Add live order tracking to the analysis engine to wire this up."),
@@ -197,10 +210,9 @@ class LiveDisplayScreen(QWidget):
             ("Waterfall",
              "3D magnitude vs. frequency vs. time. Batch-computed from the DC record."),
         ):
-            tabs.addTab(
-                PlaceholderPanel(label, detail, muted_color=self._muted),
-                label,
-            )
+            panel = PlaceholderPanel(label, detail, muted_color=self._muted)
+            self._placeholder_panels.append(panel)
+            tabs.addTab(panel, label)
         return tabs
 
     @staticmethod
@@ -241,6 +253,7 @@ class LiveDisplayScreen(QWidget):
         ]
         table.setRowCount(len(rows))
         self._row_index.clear()
+        self._row_stamp.clear()
         for r, (gear, direction) in enumerate(rows):
             self._row_index[(gear, direction)] = r
             gear_id_item = QTableWidgetItem(f"{gear}_{direction}")
@@ -355,6 +368,7 @@ class LiveDisplayScreen(QWidget):
         if item is None:
             item = QTableWidgetItem("")
             self._results_table.setItem(row, 1, item)
+        self._row_stamp[(gear, direction)] = stamp
         color_hex = self._pass if stamp == "PASS" else self._alarm if stamp == "FAIL" else None
         if color_hex is None:
             item.setBackground(QBrush())
@@ -376,6 +390,46 @@ class LiveDisplayScreen(QWidget):
         # LiveStatsPanel reads from the raw trace's public buffer to
         # avoid keeping a duplicate rolling window in RAM.
         self._stats_panel.update_from_buffer(list(self._raw_trace._buffer))
+
+    # --- theme -------------------------------------------------------
+
+    def _load_palette(self) -> None:
+        app = QApplication.instance()
+        theme = getattr(app, "theme", None) if app is not None else None
+        palette_name = theme.palette_name if theme is not None else "dark"
+        palette = load_tokens()["color"]["palettes"][palette_name]
+        self._accent_primary = palette["accentPrimary"]
+        self._accent_secondary = palette["accentSecondary"]
+        self._muted = palette["secondaryText"]
+        self._pass = palette["pass"]
+        self._alarm = palette["alarm"]
+
+    def _on_theme_changed(self, _palette_name: str) -> None:
+        """Rebuild every inline-styled child's colors from the fresh
+        palette. The app-level QSS refresh already handled everything
+        that goes through type-selector styles."""
+        self._load_palette()
+        self._toolbar.apply_palette(icon_color=self._accent_secondary, muted_color=self._muted)
+        self._status_bar.apply_palette(muted_color=self._muted, accent_color=self._accent_secondary)
+        self._stats_panel.apply_palette(muted_color=self._muted, accent_color=self._accent_secondary)
+        for panel in self._placeholder_panels:
+            panel.apply_palette(muted_color=self._muted)
+        # Repaint the FFT trace in the new accent color.
+        self._fft_trace._trace_color = QColor(self._accent_primary)
+        self._fft_trace.update()
+        # Repaint any already-shown Result cells in the fresh pass/alarm hex.
+        self._repaint_result_cells()
+        # Refresh the Gear ID column color.
+        for row in range(self._results_table.rowCount()):
+            item = self._results_table.item(row, 0)
+            if item is not None:
+                item.setForeground(QBrush(QColor(self._accent_secondary)))
+
+    def _repaint_result_cells(self) -> None:
+        """After a palette flip, re-apply each cached stamp with the
+        fresh pass/alarm hex. Rows with no stamp cache stay empty."""
+        for (gear, direction), stamp in self._row_stamp.items():
+            self._paint_result_cell(gear, direction, stamp)
 
     # --- helpers -----------------------------------------------------
 

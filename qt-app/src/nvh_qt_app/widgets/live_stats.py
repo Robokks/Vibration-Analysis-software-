@@ -28,6 +28,7 @@ class LiveStatsPanel(QWidget):
         layout.setHorizontalSpacing(48)
         layout.setVerticalSpacing(12)
 
+        self._title_labels: list[QLabel] = []
         self._labels: dict[str, QLabel] = {}
         rows = (
             ("RMS", "rms"), ("Peak", "peak"), ("Crest", "crest"),
@@ -35,21 +36,34 @@ class LiveStatsPanel(QWidget):
         )
         for index, (title, key) in enumerate(rows):
             title_label = QLabel(title)
-            title_label.setStyleSheet(
-                "QLabel { color: " + self._muted + "; "
-                "font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; "
-                "letter-spacing: 0.1em; text-transform: uppercase; }"
-            )
             value_label = QLabel("—")
             value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            value_label.setStyleSheet(
-                "QLabel { color: " + self._accent + "; "
-                "font-family: 'IBM Plex Mono', monospace; font-size: 24px; }"
-            )
             layout.addWidget(title_label, index, 0)
             layout.addWidget(value_label, index, 1)
+            self._title_labels.append(title_label)
             self._labels[key] = value_label
         layout.setColumnStretch(1, 1)
+        self._apply_styles()
+
+    def _apply_styles(self) -> None:
+        title_style = (
+            "QLabel { color: " + self._muted + "; "
+            "font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; "
+            "letter-spacing: 0.1em; text-transform: uppercase; }"
+        )
+        value_style = (
+            "QLabel { color: " + self._accent + "; "
+            "font-family: 'IBM Plex Mono', monospace; font-size: 24px; }"
+        )
+        for title in self._title_labels:
+            title.setStyleSheet(title_style)
+        for value in self._labels.values():
+            value.setStyleSheet(value_style)
+
+    def apply_palette(self, muted_color: str, accent_color: str) -> None:
+        self._muted = muted_color
+        self._accent = accent_color
+        self._apply_styles()
 
     def update_from_buffer(self, samples: Sequence[float]) -> None:
         if len(samples) < 8:

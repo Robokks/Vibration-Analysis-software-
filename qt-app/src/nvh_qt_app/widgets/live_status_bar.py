@@ -48,21 +48,31 @@ class LiveStatusBar(QFrame):
         # Two rows of ~5 columns each so the bar stays compact horizontally
         # instead of scrolling on a 1400px capture.
         per_row = 5
+        # Keep the last-set raw value per field so a theme change can
+        # re-render the rich text with the fresh palette without losing
+        # the value that was displayed.
+        self._values: dict[str, str] = {name: _PLACEHOLDER for name, _ in _FIELDS}
         self._labels: dict[str, QLabel] = {}
-        for index, (name, human) in enumerate(_FIELDS):
+        for index, (name, _human) in enumerate(_FIELDS):
             row = index // per_row
             col = index % per_row
-            container = QLabel(self._format(human, _PLACEHOLDER))
+            container = QLabel()
             container.setTextFormat(Qt.TextFormat.RichText)
-            container.setStyleSheet(
-                "QLabel { font-family: 'IBM Plex Mono', monospace; font-size: 11px; "
-                f"color: {self._muted}; }}"
-            )
             self._labels[name] = container
             layout.addWidget(container, row, col)
+        self._apply_label_style()
+        self._refresh_all()
 
         for c in range(per_row):
             layout.setColumnStretch(c, 1)
+
+    def _apply_label_style(self) -> None:
+        style = (
+            "QLabel { font-family: 'IBM Plex Mono', monospace; font-size: 11px; "
+            f"color: {self._muted}; }}"
+        )
+        for label in self._labels.values():
+            label.setStyleSheet(style)
 
     def _format(self, human: str, value: str) -> str:
         return (
@@ -70,16 +80,28 @@ class LiveStatusBar(QFrame):
             f'<span style="color:{self._accent}">{value}</span>'
         )
 
+    def _refresh_all(self) -> None:
+        humans = dict(_FIELDS)
+        for name, value in self._values.items():
+            self._labels[name].setText(self._format(humans[name], value))
+
     def set_field(self, name: str, value: str | int | None) -> None:
         if name not in self._labels:
             return
         text = _PLACEHOLDER if value is None or value == "" else str(value)
+        self._values[name] = text
         human = dict(_FIELDS)[name]
         self._labels[name].setText(self._format(human, text))
 
     def reset(self) -> None:
         for name in self._labels:
             self.set_field(name, None)
+
+    def apply_palette(self, muted_color: str, accent_color: str) -> None:
+        self._muted = muted_color
+        self._accent = accent_color
+        self._apply_label_style()
+        self._refresh_all()
 
     def field_text(self, name: str) -> str:
         """Test helper -- return the plain text currently shown in the

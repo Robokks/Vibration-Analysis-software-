@@ -81,6 +81,22 @@ def build_stylesheet(palette_name: str = "dark") -> str:
         color: {accent_primary};
     }}
 
+    QPushButton#ThemeToggle {{
+        background: transparent;
+        border: {stroke}px solid {graticule};
+        border-radius: 4px;
+        padding: 4px 12px;
+        margin-left: 12px;
+        color: {secondary_text};
+        font-family: "{fonts["mono"]}";
+        font-size: 11px;
+    }}
+
+    QPushButton#ThemeToggle:hover {{
+        color: {accent_secondary};
+        border-color: {accent_secondary};
+    }}
+
     TodoBanner {{
         background-color: {panel};
         border: 1px solid {accent_primary};

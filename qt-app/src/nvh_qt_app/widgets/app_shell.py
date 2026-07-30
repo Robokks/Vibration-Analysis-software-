@@ -4,10 +4,13 @@ frontend's ``AppShell`` component."""
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QHBoxLayout,
     QMainWindow,
+    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -16,6 +19,8 @@ from PySide6.QtWidgets import (
 from ..screens.live_display import LiveDisplayScreen
 from ..screens.master_entry import MasterEntryScreen
 from ..screens.reports import ReportsScreen
+from ..theme import build_stylesheet
+from ..theme_manager import ThemeManager
 from .gear_glyph import GearGlyphWidget
 from .labels import AppSubtitle, AppTitle
 from .nav_button import NavButton
@@ -33,6 +38,18 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("NVH EOL Test System")
         self.resize(1280, 800)
+
+        # Attach a theme manager to the QApplication if app.main() didn't
+        # (tests instantiate MainWindow directly without going through
+        # app.main), so any widget can reach QApplication.instance().theme.
+        app = QApplication.instance()
+        if not hasattr(app, "theme"):
+            app.theme = ThemeManager()
+            app.setStyleSheet(build_stylesheet(app.theme.palette_name))
+            app.theme.theme_changed.connect(
+                lambda name: app.setStyleSheet(build_stylesheet(name))
+            )
+        self._theme = app.theme
 
         central = QWidget()
         root_layout = QVBoxLayout(central)
@@ -75,6 +92,20 @@ class MainWindow(QMainWindow):
                 button.setChecked(True)
         nav_group.idClicked.connect(self._show_screen)
         self._nav_group = nav_group
+
+        # Theme toggle button -- label reflects the palette a click will
+        # switch TO (matches OS convention). Distinct object name so the
+        # QSS can target it explicitly if we want to and so tests can
+        # find it without knowing the layout index.
+        self._theme_button = QPushButton(self._theme.human_label())
+        self._theme_button.setObjectName("ThemeToggle")
+        self._theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._theme_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._theme_button.clicked.connect(self._theme.toggle)
+        self._theme.theme_changed.connect(
+            lambda _name: self._theme_button.setText(self._theme.human_label())
+        )
+        layout.addWidget(self._theme_button)
 
         return header
 

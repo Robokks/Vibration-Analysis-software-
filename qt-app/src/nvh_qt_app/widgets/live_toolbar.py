@@ -29,7 +29,9 @@ _TOOLBAR_ACTIONS: tuple[tuple[str, str], ...] = (
 
 class LiveToolbar(QFrame):
     """Icon+label toolbar row with an object name QSS can hook onto
-    (``LiveToolbar``). Emits `action_triggered(str)` on any button click."""
+    (``LiveToolbar``). Emits `action_triggered(str)` on any button click.
+    Colors are refreshable via ``apply_palette(icon, muted)`` when the
+    global ThemeManager flips dark/light."""
 
     action_triggered = Signal(str)
 
@@ -67,6 +69,11 @@ class LiveToolbar(QFrame):
         # Fixed width keeps the toolbar visually aligned regardless of
         # per-label text length; height auto-sizes to icon + label.
         button.setFixedWidth(78)
+        self._paint_button(button)
+        button.clicked.connect(lambda _checked=False, n=name: self.action_triggered.emit(n))
+        return button
+
+    def _paint_button(self, button: QToolButton) -> None:
         button.setStyleSheet(
             "QToolButton { "
             f"color: {self._muted_color}; "
@@ -74,10 +81,18 @@ class LiveToolbar(QFrame):
             "font-family: 'IBM Plex Sans', sans-serif; font-size: 10px; }"
             "QToolButton:hover { "
             f"color: {self._icon_color}; "
-            "background: rgba(79, 216, 224, 0.08); border-radius: 4px; }"
+            "background: rgba(127, 127, 127, 0.10); border-radius: 4px; }"
         )
-        button.clicked.connect(lambda _checked=False, n=name: self.action_triggered.emit(n))
-        return button
+
+    def apply_palette(self, icon_color: str, muted_color: str) -> None:
+        """Re-render every button icon at the new stroke color and
+        rebuild the per-button QSS. Called by LiveDisplayScreen when the
+        global ThemeManager flips palettes."""
+        self._icon_color = icon_color
+        self._muted_color = muted_color
+        for name, button in self._buttons.items():
+            button.setIcon(make_icon(name, icon_color, size=28))
+            self._paint_button(button)
 
     def button(self, name: str) -> QToolButton:
         return self._buttons[name]

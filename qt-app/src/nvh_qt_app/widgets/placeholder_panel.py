@@ -18,22 +18,30 @@ class PlaceholderPanel(QWidget):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
 
-        title_label = QLabel(title)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setStyleSheet(
-            "QLabel { color: " + muted_color + "; "
+        self._muted = muted_color
+        self._title_label = QLabel(title)
+        self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._detail_label = QLabel(detail)
+        self._detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._detail_label.setWordWrap(True)
+        self._apply_styles()
+
+        layout.addStretch(1)
+        layout.addWidget(self._title_label)
+        layout.addWidget(self._detail_label)
+        layout.addStretch(1)
+
+    def _apply_styles(self) -> None:
+        self._title_label.setStyleSheet(
+            "QLabel { color: " + self._muted + "; "
             "font-family: 'IBM Plex Sans', sans-serif; font-size: 16px; "
             "letter-spacing: 0.12em; text-transform: uppercase; }"
         )
-        detail_label = QLabel(detail)
-        detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        detail_label.setWordWrap(True)
-        detail_label.setStyleSheet(
-            "QLabel { color: " + muted_color + "; "
+        self._detail_label.setStyleSheet(
+            "QLabel { color: " + self._muted + "; "
             "font-family: 'IBM Plex Mono', monospace; font-size: 12px; }"
         )
 
-        layout.addStretch(1)
-        layout.addWidget(title_label)
-        layout.addWidget(detail_label)
-        layout.addStretch(1)
+    def apply_palette(self, muted_color: str) -> None:
+        self._muted = muted_color
+        self._apply_styles()

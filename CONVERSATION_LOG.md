@@ -775,6 +775,62 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — "dark mode light mode"
+
+**User:** "dark mode light mode" -- 3 words, requesting runtime theme
+switching.
+
+**Assistant:** noticed the design tokens already carry both palettes
+(`dark` = the operator theme, `print` = fully specified light-
+background palette originally intended for PDF report output). And
+`theme.build_stylesheet(name)` already accepts either. The missing
+piece was a runtime toggle + refresh path for widgets with inline
+styles.
+
+Built it:
+
+- **`ThemeManager(QObject)`** in a new `theme_manager` module. Owns
+  the current palette name, exposes `.palette` (dict from
+  load_tokens), `.toggle()`, and `theme_changed(str)` signal.
+  Attached to the QApplication as `.theme` so any widget reaches it
+  without a constructor chain.
+- **HeaderBar toggle button**: a `QPushButton#ThemeToggle` sits at
+  the top-right next to the nav buttons. Label reflects the palette
+  a click will switch TO ("Light" when in dark, "Dark" when in
+  light) -- matches the OS convention.
+- **App-level QSS refresh**: `app.setStyleSheet(build_stylesheet(new))`
+  fires on every `theme_changed`, cascading all type-selector styles
+  (Panel/SectionTitle/QTableWidget/QTabWidget/etc.) to the new
+  palette automatically.
+- **Inline-style widgets gained `apply_palette(...)` methods and
+  screens cascade to their children on `theme_changed`**:
+  `LiveToolbar` (re-renders each icon at the new stroke color +
+  rebuilds per-button QSS -- the SVG icon color has to be baked in
+  since QIcons are rasterized pixmaps), `LiveStatusBar` (rich-text
+  rebuild with fresh colors, keeping the last-set values per
+  field), `LiveStatsPanel`, `PlaceholderPanel`, `_InTableToggle`.
+- **`LiveDisplayScreen` cascades**: also repaints the FFT trace pen
+  color and re-applies pass/alarm hex to any already-stamped Result
+  cells. Added `_row_stamp[(gear, direction)] = stamp` cache so
+  the palette flip has enough info to rebuild the color instead of
+  guessing from the current fill.
+- **GraticuleWidget palette-aware**: used to hardcode
+  `dark.background` -- now reads from the current palette and
+  subscribes to `theme_changed`. Without this the plot area stayed
+  black in light mode with a barely-visible dark grid (caught on
+  the first light-mode screenshot).
+
+Testing: 4 new tests in `test_theme_toggle.py` covering manager
+start-in-dark, toggle flips + emits, human label reflects switch
+target, and the HeaderBar's toggle button flips the app theme
+end-to-end. Full cross-package suite: **219/219 passing.**
+
+Captured a screenshot of both modes side-by-side to verify. Dark
+mode is unchanged from the previous iteration; light mode shows
+the print-palette in action -- light backgrounds, dark orange
+section titles, dark teal accents, dark red/green pass/alarm
+tokens. Sent both back to the user, committed, pushed.
+
 ### Turn — reference photo of the real LabVIEW screen: "table data"
 
 **User** attached a phone photo of the actual `VIBR-O-MATIC ANALYZER
