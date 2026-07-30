@@ -25,15 +25,17 @@ from analysis_engine.signal.stft import compute_spectrogram
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem,
-    QTabWidget, QVBoxLayout, QWidget,
+    QApplication, QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget,
+    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from nvh_design_tokens import load_tokens
 
 from ..api_client import ApiClient
+from ..freq_domain_settings import FreqDomainSettings
 from ..live_client import LiveClient
 from ..widgets.fft_trace import FftTraceWidget
+from ..widgets.freq_domain_settings_dialog import FreqDomainSettingsDialog
 from ..widgets.gear_glyph import GearGlyphWidget
 from ..widgets.labels import MonoLabel, SectionTitle
 from ..widgets.live_status_bar import LiveStatusBar
@@ -84,6 +86,13 @@ _TRACKED_ORDER_SERIES: tuple[tuple[str, float | None], ...] = (
 
 # LabVIEW PLC boundary: NVH_ID enum for direction (see docs/data-contract).
 _DIRECTION_NVH_ID: dict[str, int] = {"RU": 0, "STYD": 1, "STYC": 2, "RD": 3}
+
+
+def _to_db(magnitude: np.ndarray) -> np.ndarray:
+    """20 * log10(|magnitude|) with a small floor to avoid log(0).
+    Used when the operator flips the dB ON toggle in PLOT SETUP."""
+    floor = np.maximum(magnitude, 1e-12)
+    return 20.0 * np.log10(floor)
 
 # Results-grid layout: rows are (gear, direction) pairs, columns are one
 # graded-parameter each. Matches the real system's NVH TEST SCREEN.vi
@@ -137,6 +146,10 @@ class LiveDisplayScreen(QWidget):
         from collections import deque
         self._rpm_buffer: deque[float] = deque(maxlen=_TRACE_MAX_SAMPLES)
         self._sample_rate_hz: float = 5000.0
+        # Frequency-domain plot settings (in-memory only for now --
+        # persistence is future work). Exposed via the PLOT SETUP
+        # dialog reachable from the frequency-domain tab.
+        self._freq_settings = FreqDomainSettings()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -164,6 +177,16 @@ class LiveDisplayScreen(QWidget):
         self._plot_tabs = QTabWidget()
         self._plot_tabs.addTab(self._build_time_series_tab(), "Time series")
         self._plot_tabs.addTab(self._build_frequency_domain_tab(), "Frequency domain")
+        # A "Settings…" corner widget on the frequency-domain tab
+        # opens the multi-tab PLOT SETUP dialog. Anchored via
+        # setCornerWidget so it sits at the top-right of the tab bar
+        # regardless of which tab is active.
+        settings_btn = QPushButton("Settings…")
+        settings_btn.setObjectName("FreqSettingsButton")
+        settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        settings_btn.setFlat(True)
+        settings_btn.clicked.connect(self._open_freq_domain_settings)
+        self._plot_tabs.setCornerWidget(settings_btn, Qt.Corner.TopRightCorner)
         layout.addWidget(self._plot_tabs, stretch=1)
 
         # --- bottom results table -----------------------------------
@@ -496,24 +519,54 @@ class LiveDisplayScreen(QWidget):
     def _refresh_spectrogram(self, sample_rate_hz: float | None) -> None:
         """Compute STFT + octave bands from the current raw-signal buffer
         and push into the frequency-domain widgets. Guarded on a minimum
-        buffer size so the STFT has at least one full window per call."""
+        buffer size so the STFT has at least one full window per call.
+        nperseg / dB conversion driven by the operator's PLOT SETUP
+        settings (colormap tab -- waterfall/cascade share the projection
+        so they read from the same computed matrix)."""
         buffer = list(self._raw_trace._buffer)
         if len(buffer) < 512:
             return
         sr = sample_rate_hz or 5000.0
         arr = np.asarray(buffer, dtype=float)
+        # Bins from the settings dialog. Cap at buffer size so scipy
+        # doesn't reject nperseg > input length; halve for noverlap
+        # (50% overlap is the STFT convention the analysis engine
+        # uses by default).
+        cfg = self._freq_settings.colormap
+        nperseg = min(max(64, cfg.freq_order_bins // 8), len(buffer))
         try:
-            spec = compute_spectrogram(arr, sample_rate_hz=sr, nperseg=256, noverlap=128)
+            spec = compute_spectrogram(arr, sample_rate_hz=sr, nperseg=nperseg, noverlap=nperseg // 2)
         except Exception:
             return
-        self._colormap_plot.set_spectrogram(spec.magnitude, spec.time_s, spec.freq)
-        self._waterfall_plot.set_spectrogram(spec.magnitude, spec.time_s, spec.freq)
-        self._cascade_plot.set_spectrogram(spec.magnitude, spec.time_s, spec.freq)
+        mag = spec.magnitude
+        # dB conversion, opt-in per view -- 20 * log10(|X|) with a floor
+        # to avoid log(0). Waterfall / Cascade / Colormap each have
+        # their own dB toggle in the PLOT SETUP dialog.
+        cm_mag = _to_db(mag) if self._freq_settings.colormap.db_on else mag
+        wf_mag = _to_db(mag) if self._freq_settings.waterfall.db_on else mag
+        cs_mag = _to_db(mag) if self._freq_settings.cascade.db_on else mag
+        self._colormap_plot.set_spectrogram(cm_mag, spec.time_s, spec.freq)
+        self._waterfall_plot.set_spectrogram(wf_mag, spec.time_s, spec.freq)
+        self._cascade_plot.set_spectrogram(cs_mag, spec.time_s, spec.freq)
         try:
             bands = compute_octave_bands(arr, sample_rate_hz=sr, centers_hz=STANDARD_OCTAVE_CENTERS_HZ)
             self._octave_plot.set_bands(bands.center_freq_hz, bands.rms)
         except Exception:
             pass
+
+    def _open_freq_domain_settings(self) -> None:
+        """Show the PLOT SETUP dialog. On accept, replace the in-memory
+        settings, propagate the window/dB/bins choices down to the
+        plot widgets, and force a fresh spectrogram + order-analysis
+        pass so the new settings take effect right away."""
+        dialog = FreqDomainSettingsDialog(self._freq_settings, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._freq_settings = dialog.current_settings()
+            # Push the FFT window choice down so the live FFT trace
+            # reflects the operator's selection.
+            self._fft_trace.set_window(self._freq_settings.fft.window)
+            self._refresh_spectrogram(self._sample_rate_hz)
+            self._refresh_order_analysis()
 
     def _refresh_order_analysis(self) -> None:
         """Compute order spectrum + per-order tracking from the current
@@ -533,14 +586,20 @@ class LiveDisplayScreen(QWidget):
         time_s = np.arange(n) / sr
 
         # -- Order spectrum --
+        # samples_per_rev = 1 / order_resolution rounded to the nearest
+        # power-of-2-ish integer -- the LabVIEW screen exposes
+        # ORDER RESOLUTION directly, so let the operator's value drive
+        # this via the settings dialog.
+        cfg = self._freq_settings.order_spectrum
+        samples_per_rev = max(32, int(round(1.0 / max(cfg.order_resolution, 0.001))))
         try:
-            os_result = compute_order_spectrum(signal, time_s, rpm, samples_per_rev=180)
+            os_result = compute_order_spectrum(signal, time_s, rpm, samples_per_rev=samples_per_rev)
         except Exception:
             return
-        # Trim the leading DC bin (order 0) so the plot doesn't get
-        # dominated by any mean offset; take up to order 100 for the
-        # visible range (matches the LabVIEW screen's ~130-order cap).
-        keep = (os_result.order > 0.5) & (os_result.order <= 100.0)
+        # Trim leading DC bin + clamp to the operator-configured MAX
+        # ORDER (matches the LabVIEW screen's MAX ORDER field).
+        max_order = cfg.max_order
+        keep = (os_result.order > 0.5) & (os_result.order <= max_order)
         mag_view = os_result.magnitude[keep]
         order_view = os_result.order[keep]
         self._order_spectrum_plot.set_speed_over_time(rpm[::max(1, n // 500)].tolist())

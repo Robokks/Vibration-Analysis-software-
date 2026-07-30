@@ -6,6 +6,63 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 20:00 UTC — Qt: PLOT SETUP dialog with 7 tabs + configurable freq-domain plots
+
+User shared 7 LabVIEW reference photos of the Frequency Series' PLOT
+SETUP dialog (FFT / Order Spectrum / Order Tracking / Waterfall /
+Cascade / Colormap tabs -- Octave inferred by symmetry). Built a
+Qt equivalent that matches the field set + defaults, plus wired the
+highest-impact fields to actually take effect on the plots.
+
+- New `nvh_qt_app.freq_domain_settings` module: FreqDomainSettings
+  dataclass tree with 7 nested per-sub-tab dataclasses (FftSettings,
+  OrderSpectrumSettings, OrderTrackingSettings, 3x SpectrogramSettings
+  shared shape for Waterfall/Cascade/Colormap, OctaveSettings). Shared
+  AveragingParams + SpectraScaling submodels. Defaults come straight
+  from the LabVIEW manual (Hanning window, MAX ORDER 32, 10 averages,
+  no averaging mode, etc).
+- New `FreqDomainSettingsDialog(QDialog)`: QTabWidget with 7 tabs, each
+  rendering the manual's exact field layout via QFormLayout + labeled
+  QGroupBox sections. QDoubleSpinBox/QSpinBox for numeric fields,
+  QComboBox for enum-shaped fields (window type, averaging mode,
+  weighting mode, X axis, linear/dB, power/magnitude, view). Save +
+  Cancel buttons. Roundtrips through the FreqDomainSettings tree via
+  the constructor + `current_settings()`.
+- **Configurable wiring** (per the user's follow-up nudge):
+  - `order_spectrum.max_order` -> clamps the visible order range on the
+    Order Spectrum plot (was hardcoded to 100.0).
+  - `order_spectrum.order_resolution` -> `samples_per_rev` in
+    `compute_order_spectrum` (previously hardcoded to 180).
+  - `colormap.freq_order_bins` -> `nperseg` in `compute_spectrogram`
+    (capped at buffer length; scaled down by /8 to keep frame count
+    reasonable). Waterfall/Cascade share the same computed matrix.
+  - `colormap.db_on` / `waterfall.db_on` / `cascade.db_on` -> converts
+    magnitude to 20*log10(|X|) before display (each of the three has
+    its own toggle in the dialog).
+  - `fft.window` -> the FFT trace widget now applies the operator-
+    selected window to the buffer before the rfft (Hanning /
+    Hamming / Blackman / Flat top / Gaussian / Rectangular all
+    implemented). New `_get_window(name, n)` helper in
+    `widgets/fft_trace.py`.
+- Live Display gets a corner-widget "Settings…" button in the top-
+  right of the plot-tabs bar (only visible while on Frequency
+  domain; the corner-widget stays put across tab switches). QSS
+  entry in theme.py styles it in accent-secondary.
+- Settings live on `LiveDisplayScreen._freq_settings` in memory --
+  persistence to the backend is future work. On dialog accept the
+  screen: replaces the dataclass tree, calls
+  `_fft_trace.set_window(...)`, `_refresh_spectrogram(...)`, and
+  `_refresh_order_analysis()` so the new values take effect
+  immediately.
+- Testing: 7 new tests in `test_freq_domain_settings_dialog.py`
+  covering dialog shape (7 tabs, correct labels), value roundtrips
+  through the constructor + `current_settings()` on all 4 major
+  tab types, and end-to-end propagation from the settings tree to
+  the `FftTraceWidget`'s window name. Full cross-package suite:
+  **252/252 passing.**
+
+---
+
 ## 2026-07-30 19:15 UTC — Qt: real Order Spectrum + Order Tracking sub-tabs
 
 User shared two more photos of the real LabVIEW system's Frequency

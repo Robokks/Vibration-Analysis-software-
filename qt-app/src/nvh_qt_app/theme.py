@@ -97,6 +97,19 @@ def build_stylesheet(palette_name: str = "dark") -> str:
         border-color: {accent_secondary};
     }}
 
+    QPushButton#FreqSettingsButton {{
+        background: transparent;
+        border: none;
+        padding: 4px 10px;
+        color: {accent_secondary};
+        font-family: "{fonts["mono"]}";
+        font-size: 11px;
+    }}
+
+    QPushButton#FreqSettingsButton:hover {{
+        color: {accent_primary};
+    }}
+
     TodoBanner {{
         background-color: {panel};
         border: 1px solid {accent_primary};

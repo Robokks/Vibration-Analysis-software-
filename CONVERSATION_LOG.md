@@ -775,6 +775,85 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — "frequency domain setting" (7 photos) + "configurable"
+
+**User** attached 7 phone photos of the real LabVIEW PLOT SETUP
+dialog on different tabs (FFT / Order Spectrum / Order Tracking /
+Waterfall / Cascade / Colormap -- Octave by symmetry), showing the
+exact field set for each. Message: "frequency domain setting".
+
+Built a Qt equivalent matching the LabVIEW field set:
+
+- **FreqDomainSettings dataclass tree** in a new
+  `nvh_qt_app.freq_domain_settings` module. One dataclass per
+  sub-tab: FftSettings (peak search + zoom settings + averaging +
+  spectra), OrderSpectrumSettings (max order + order resolution +
+  window + envelope band + peak search), OrderTrackingSettings
+  (X axis + max/BW order + time/speed segment ranges + scaling),
+  SpectrogramSettings shared by Waterfall / Cascade / Colormap
+  (plot type + max order + dB ON + window type + freq/order bins
+  + time/speed segments + scaling), OctaveSettings (averaging +
+  spectra). Shared AveragingParams + SpectraScaling submodels for
+  the two field-blocks that appear on multiple tabs. Defaults come
+  straight from the LabVIEW screens (Hanning window, MAX ORDER 32,
+  10 averages, No averaging, etc).
+- **FreqDomainSettingsDialog(QDialog)** in a new
+  `widgets/freq_domain_settings_dialog.py` module. QTabWidget with
+  7 tabs; each tab body is a small QWidget class that lays out the
+  form via QFormLayout inside labeled QGroupBox sections. Field
+  types map cleanly: QDoubleSpinBox for numeric, QSpinBox for
+  integer, QComboBox for enum, QCheckBox for dB-on toggles. Save +
+  Cancel via QDialogButtonBox. Roundtrips through the settings
+  tree via the constructor + `current_settings()`.
+- **Settings "…" corner-widget button** in the top-right of the
+  plot-tabs area of Live Display (via `setCornerWidget` so it
+  survives tab switches). QSS entry styles it in the accent-
+  secondary cyan. Opens the dialog with the current settings;
+  on accept, replaces the dataclass tree.
+
+**User mid-turn:** "configurable" -- reminder to make the settings
+actually take effect, not just look configurable. Wired the
+highest-impact fields:
+
+- `order_spectrum.max_order` -> clamps the visible order range on
+  the Order Spectrum bottom plot (previously hardcoded to 100).
+- `order_spectrum.order_resolution` -> converts to samples_per_rev
+  for `compute_order_spectrum` (previously hardcoded to 180).
+- `colormap.freq_order_bins` -> STFT nperseg
+  (`compute_spectrogram(arr, nperseg=..., noverlap=nperseg//2)`),
+  capped at buffer length. Waterfall/Cascade share the same
+  computed matrix.
+- `colormap.db_on` / `waterfall.db_on` / `cascade.db_on` ->
+  converts magnitude to 20*log10(|X|) before rendering (each has
+  its own toggle, so an operator can pick dB on one projection
+  and linear on another). New `_to_db(magnitude)` helper with a
+  1e-12 floor to avoid log(0).
+- `fft.window` -> the FftTraceWidget now applies the operator-
+  selected window before the rfft. Extended the widget with
+  `set_window(name)` + a small `_get_window(name, n)` helper
+  supporting Hanning/Hamming/Blackman/Flat top/Gaussian/
+  Rectangular (Flat top inlined since we don't take a scipy
+  dep here -- the Live Display side sticks to numpy for the
+  live FFT while the batch analysis engine already uses scipy).
+
+Testing: 7 new widget tests in
+`test_freq_domain_settings_dialog.py` -- dialog shape (7 tabs,
+correct labels), roundtrip preservation on 4 tab types (FFT with
+window/overlap/lines, OrderSpectrum with max_order edit,
+OrderTracking with x_axis, Waterfall with db_on/window/bins),
+shared SpectraScaling roundtrip, live-display integration
+verifying the corner-widget button exists + default max_order is
+32 + FFT window setting propagates to the widget after applying
+settings. Full cross-package suite: **252/252 passing.**
+
+Screenshotted the dialog on all 7 tabs against the dark theme -- FFT
+tab shows the exact LabVIEW layout (PEAK SEARCH SETTINGS with
+Single Max Peak + -74.7399 threshold, ZOOM SETTINGS with Hanning /
+0% overlap, AVERAGING PARAMETERS with No averaging / Exponential /
+10 / One shot, SPECTRA with no change / magnitude / rms). Sent to
+the user, updated PROGRESS.md, wrote this transcript entry,
+committed, pushed.
+
 ### Turn — LabVIEW ORDER SPECTRUM + ORDER TRACKING reference photos
 
 **User** attached two more phone photos of the real LabVIEW system,

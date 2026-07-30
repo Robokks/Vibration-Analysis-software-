@@ -20,6 +20,35 @@ from .graticule import GraticuleWidget
 _TRACE_STROKE_WIDTH = 1.5
 
 
+def _get_window(name: str, n: int) -> np.ndarray:
+    """Return a length-n window for the named type. Rectangular = all
+    ones. Anything unrecognized falls back to rectangular."""
+    if n <= 0:
+        return np.ones(0)
+    lname = name.lower()
+    if lname in ("rectangular", "boxcar", "none"):
+        return np.ones(n)
+    if lname == "hanning":
+        return np.hanning(n)
+    if lname == "hamming":
+        return np.hamming(n)
+    if lname == "blackman":
+        return np.blackman(n)
+    if lname == "flat top":
+        # scipy's flattop, expanded inline so we don't add a scipy dep here.
+        a = (0.21557895, 0.41663158, 0.277263158, 0.083578947, 0.006947368)
+        i = np.arange(n)
+        return sum(sign * ai * np.cos(2 * np.pi * k * i / (n - 1))
+                   for k, (sign, ai) in enumerate(zip((1, -1, 1, -1, 1), a)))
+    if lname == "gaussian":
+        # sigma = 0.4 * (n-1)/2 -- moderate spread, matches scipy default-ish.
+        sigma = 0.4 * (n - 1) / 2 or 1.0
+        i = np.arange(n)
+        center = (n - 1) / 2
+        return np.exp(-0.5 * ((i - center) / sigma) ** 2)
+    return np.ones(n)
+
+
 class FftTraceWidget(GraticuleWidget):
     """Real-valued FFT magnitude spectrum of the last N samples --
     autoscaled to the current peak. Sample rate is passed in from the
@@ -32,9 +61,16 @@ class FftTraceWidget(GraticuleWidget):
         self._max_samples = max_samples
         self._buffer: deque[float] = deque(maxlen=max_samples)
         self._sample_rate_hz: float = 5000.0  # simulator default; overwritten by chunks
+        # Applied to the buffer before the rfft; default Hanning matches
+        # the LabVIEW PLOT SETUP dialog's default.
+        self._window_name: str = "Hanning"
 
         tokens = load_tokens()
         self._trace_color = QColor(tokens["color"]["palettes"]["dark"]["accentPrimary"])
+
+    def set_window(self, name: str) -> None:
+        self._window_name = name
+        self.update()
 
     def append_samples(self, samples: Iterable[float], sample_rate_hz: float | None = None) -> None:
         added = False
@@ -64,9 +100,10 @@ class FftTraceWidget(GraticuleWidget):
             return
 
         arr = np.asarray(self._buffer, dtype=float)
-        # Simple rectangular window is fine for a live-monitor magnitude
-        # display -- we're showing shape, not measuring absolute levels.
-        spectrum = np.abs(np.fft.rfft(arr))
+        # Apply the operator-selected window (Hanning by default from
+        # the PLOT SETUP dialog). Rectangular window = pass-through.
+        window = _get_window(self._window_name, arr.size)
+        spectrum = np.abs(np.fft.rfft(arr * window))
         if spectrum.size < 2:
             return
         # Drop DC bin so the visible dynamic range isn't dominated by
