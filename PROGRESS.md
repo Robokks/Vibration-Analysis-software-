@@ -6,6 +6,50 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 13:45 UTC — Qt Live Display rebuild: toolbar + nested tabs + status bar
+
+Rebuilt the qt-app Live Display screen to match the real system's
+operator layout, replacing the single trace + 4-card scaffold. The new
+screen has four visual bands stacked vertically:
+
+- **Top toolbar** — nine SVG-icon buttons matching the real operator
+  workflow (Login / Calibration / System / D Report / Summary /
+  Master / Master Setup / Table Config / Limit Config). Icons are
+  inline SVGs drawn from a new `nvh_qt_app.icons` module, colored via
+  the design tokens' `accentSecondary`; hover state is a subtle
+  tinted rounded corner. Each button emits `action_triggered(name)`
+  so future routing (e.g. Master button → nav to Master Entry) can be
+  wired without touching the toolbar.
+- **Plot tabs** — a `QTabWidget` with two top-level tabs (Time series /
+  Frequency domain) and nested subtabs inside each:
+  - Time series → **Raw signal** (existing `SignalTraceWidget`) +
+    **Computed** (new `LiveStatsPanel` — RMS/peak/crest/mean/N
+    recomputed on every chunk via numpy).
+  - Frequency domain → **FFT** (new `FftTraceWidget` — `np.fft.rfft`
+    of the current buffer, magnitude autoscaled, painted over the
+    same graticule; the demo data's gear-mesh harmonics are clearly
+    visible at 1×, 2×, 3× the fundamental) + four **placeholder**
+    subtabs (Order spectrum / Order tracking / Color map / Waterfall)
+    that label themselves as batch-computed-not-streamed today rather
+    than pretending to compute an empty result.
+- **Live parameter catalog table** — fetches
+  `/models/MODEL-A/programs/REVA/parameters` once on load, shows
+  stat_name + order + LIMIT band + table-config membership.
+- **Bottom status bar** — 9 fields in a 2-row grid: Op / Shift / SN /
+  Rep / Model / Status / Gear / NVH / Result. Backfilled from
+  `/test-runs/{id}` on every `test_run` event; direction is mapped to
+  the PLC `nvh_id` (0=RU, 1=STYD, 2=STYC, 3=RD).
+- New widgets: `LiveToolbar`, `LiveStatusBar`, `LiveStatsPanel`,
+  `FftTraceWidget`, `PlaceholderPanel`.
+- Testing: new `FakeLiveClient` in the test fakes (public
+  `emit_event`/`emit_status` for synchronous driving), 8 new
+  `test_live_display.py` tests covering toolbar wiring, tab structure,
+  parameter fetch, test_run/dc/signal_chunk event handling, and the
+  RUNNING-clears-previous-traces reset behavior. Full qt-app suite:
+  **26/26 passing**.
+
+---
+
 ## 2026-07-30 11:20 UTC — LIMIT band edit + Table Config parameter toggle
 
 Second round of write endpoints, extending the threshold-tuning pattern:

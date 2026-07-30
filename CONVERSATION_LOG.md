@@ -775,6 +775,102 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — "screen modification for qt" / Live Display rebuild spec
+
+**User:** "screen modification for qt" — ambiguous at first, so I asked
+via AskUserQuestion which screen. **User answered** "give the
+screenshot", i.e. show me what's there today first.
+
+**Assistant:** started backend + simulator, wrote a small
+`qt_one_screen.py` helper that instantiates any one screen headlessly
+and grabs a PNG, then sent all three (Live / Master Entry / Reports)
+back to the user. Called out three visible issues from the captures:
+Reports had a fetch-race showing a FAIL stamp on a healthy-unit
+selection; Master Entry's parameter table was cramped because of an
+`addStretch(1)` collapsing the panel; Live Display's GEAR/DIR/STAMP
+cards read as em-dashes because the DC event hadn't arrived yet.
+
+**User** then gave a detailed spec for a redesigned Live Display:
+top toolbar with nine icons (Login / Calibration / System Config /
+D Report / Summary Report / Master / Master Setup / Table Config /
+Limit Config), nested tabs (Time series with Raw signal + Computed;
+Frequency domain with FFT + Order spectrum + Order tracking + Color
+map + Waterfall), a bottom table, and a bottom status bar with nine
+operator-visible fields (operator / shift / serial / repeat / model /
+NVH start-stop / gear id / nvh id / test result).
+
+**Assistant:** built it as one large slice. Broke it into six tasks in
+the TaskList (icons / layout rebuild / time-series subtabs /
+frequency-domain subtabs / status-bar and parameter table wiring /
+tests-screenshot-commit), then implemented straight through:
+
+- **Icons** — new `nvh_qt_app.icons` module: nine 24×24 inline SVGs
+  (login / calibration / system_config / d_report / summary_report /
+  master / master_setup / table_config / limit_config), stroke color
+  interpolated at render time via a `__STROKE__` placeholder so one
+  glyph serves both dark/print palettes without disk duplicates.
+  `make_icon(name, color, size)` renders via `QSvgRenderer` at
+  whatever pixel size Qt asks for.
+- **Toolbar** — new `LiveToolbar(QFrame)`: nine `QToolButton`s
+  (icon-above-text style) each 78px wide so the row stays visually
+  aligned, hover state tinted accent-secondary. Emits
+  `action_triggered(name)`; the screen currently just surfaces the
+  click in the status label so it's observable, and MainWindow can
+  wire real routing (Master → Master Entry, D Report → Reports) in a
+  follow-up.
+- **Status bar** — new `LiveStatusBar(QFrame)`: 2-row × 5-column grid
+  of `label: value` pairs (Op / Shift / SN / Rep / Model / Status /
+  Gear / NVH / Result). `set_field(name, value)` accepts `None` and
+  paints em-dash. Rich text so the label prefix and value use
+  distinct colors from the palette.
+- **Stats panel** — new `LiveStatsPanel(QWidget)`: 5-row grid
+  (RMS/Peak/Crest/Mean/Samples), values recomputed from the raw
+  trace's buffer on every chunk via numpy reductions. <8 samples
+  paints em-dashes to avoid NaN readings during warmup.
+- **FFT trace** — new `FftTraceWidget(GraticuleWidget)` mirroring the
+  existing `SignalTraceWidget` shape: appends samples, on paint
+  computes `np.fft.rfft(buffer)`, drops the DC bin so a signal with
+  mean offset doesn't wash out the visible dynamic range,
+  autoscales to peak, paints the magnitude polyline in accent-primary
+  yellow to distinguish it from the raw trace's accent-secondary
+  cyan. The rendered result nicely shows the simulator's gear-mesh
+  harmonics at 1×/2×/3×.
+- **Placeholder panel** — new `PlaceholderPanel(QWidget)` for the
+  four frequency-domain subtabs that aren't computed live today.
+  Title + reason so operators see the whole intended surface and
+  know exactly why each is empty rather than assuming it's broken.
+- **LiveDisplayScreen rewrite** — same event handlers as before, but
+  now drives raw+FFT+stats simultaneously off each signal_chunk,
+  updates the 9 status-bar fields on test_run + dc events, and
+  backfills operator/shift/serial/repeat from `/test-runs/{id}` on
+  every test_run event. Toolbar action clicks surface in the top
+  status label.
+- **REST error cleanup**: initially I appended REST errors onto the
+  status label ("REST: server replied Not Found") but that fired
+  constantly against the live simulator because simulator test_run
+  IDs are ephemeral (never persisted, always 404). Silenced the
+  handler -- REST failures are already visible via the parameter
+  table staying empty, and this is a background-fetch that the live
+  stream doesn't depend on.
+
+- **Tests** — new `FakeLiveClient` in `qt-app/tests/fakes.py`
+  (public `emit_event`/`emit_status` methods for synchronous driving,
+  no socket). 8 new tests in `test_live_display.py`: toolbar has all
+  9 buttons, click surfaces in status, both plot tabs present,
+  parameter table populates, test_run event fetches detail and fills
+  status bar, dc event updates gear/nvh_id/result, signal_chunk
+  updates raw+FFT+stats simultaneously, RUNNING transition clears
+  previous traces. **26/26 qt-app tests passing.**
+
+Grabbed live screenshots against the running backend + simulator for
+all three tabs (Time series > Raw signal, Time series > Computed,
+Frequency domain > FFT) -- the FFT view clearly shows the simulator's
+gear-mesh order harmonics at 1×, 2×, 3× the fundamental, which is the
+most gratifying visual verification since the whole point of the FFT
+tab is to make those visible to the operator in real time. Sent the
+captures to the user, updated PROGRESS.md, wrote this transcript
+entry, and pushed.
+
 ### Turn — "what is pending" / "do all"
 
 **User:** "what is pending" — a status query, not a task.

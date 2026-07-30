@@ -1,7 +1,8 @@
-"""A fake ApiClient for widget-level tests -- calls on_success/on_error
-synchronously with canned payloads, no real network/event-loop dependency.
-Avoids coupling qt-app's test suite to web-backend existing/being
-importable, and avoids needing a live backend in CI."""
+"""Fake ApiClient + LiveClient for widget-level tests -- both call the
+same callbacks the real transports do, but synchronously with canned
+payloads, no real network/event-loop dependency. Avoids coupling
+qt-app's test suite to web-backend existing/being importable, and
+avoids needing a live backend in CI."""
 
 from __future__ import annotations
 
@@ -124,3 +125,28 @@ class FakeApiClient:
                 "included_in_table_config": included,
             }
         on_success(response)
+
+
+class FakeLiveClient:
+    """Stand-in for nvh_qt_app.live_client.LiveClient. Doesn't actually
+    open a socket -- start()/stop() just flip a flag, and callers push
+    canned payloads directly via emit_event()/emit_status(). Callback
+    binding matches the real client's public-attribute style."""
+
+    def __init__(self) -> None:
+        self.on_event = lambda _payload: None
+        self.on_status = lambda _state, _error: None
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def emit_event(self, payload: dict[str, Any]) -> None:
+        self.on_event(payload)
+
+    def emit_status(self, state: str, error: str | None = None) -> None:
+        self.on_status(state, error)
