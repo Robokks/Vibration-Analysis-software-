@@ -10,6 +10,7 @@ dependencies = [
 
 [project.scripts]
 nvh-qt-app = "nvh_qt_app.app:main"
+nvh-launcher = "nvh_qt_app.launcher:main"
 
 [build-system]
 requires = ["setuptools>=68"]

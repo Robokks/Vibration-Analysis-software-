@@ -119,11 +119,26 @@ into the wrong sub-venv.
 > active — the prompt shows `(.venv)` or `(venv)`. Activate with
 > `. .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\activate`
 > (Windows PowerShell). Once active, `python`, `pip`, and the console
-> scripts (`nvh-sim`, `nvh-web-backend`, `nvh-qt-app`) all resolve on
+> scripts (`nvh-launcher`, `nvh-sim`, `nvh-web-backend`, `nvh-qt-app`) all resolve on
 > `PATH` — you do NOT prefix them with `.venv/bin/` on Linux or
 > `.venv\Scripts\` on Windows. Do not paste `.venv/bin/nvh-sim` into
 > PowerShell — that's a Linux path and Windows will report
 > `CommandNotFoundException`.
+
+## Single-window launcher (recommended)
+
+```bash
+nvh-launcher
+```
+
+A small PySide6 window that manages every subprocess for you: one-click
+`Seed Demo Data`, `Run Analysis Demo`, and `Open Web UI` up top, then
+four managed services (Live Simulator, FastAPI Backend, Web Frontend,
+Qt Desktop App) each with a status LED, Start/Stop toggle, and live log
+tail. Closes cleanly — offers to stop anything still running.
+
+The rest of the sections below list the same commands the launcher
+invokes, for when you want to run them by hand instead.
 
 ## Run the end-to-end analysis demo
 
