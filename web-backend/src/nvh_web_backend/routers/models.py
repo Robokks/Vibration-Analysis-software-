@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from nvh_api_schemas.catalog import ParameterCatalogRowOut
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from nvh_api_schemas.catalog import LimitConfigThresholdUpdate, ParameterCatalogRowOut
 from nvh_contract.db import MasterProfileRow, ModelRow
 from nvh_contract.models import MasterProfile, Model
 from sqlalchemy.orm import Session
 
 from nvh_web_backend.adapters import model_row_to_model
-from nvh_web_backend.catalog_service import parameter_catalog_rows
+from nvh_web_backend.catalog_service import parameter_catalog_rows, update_limit_config_threshold
 from nvh_web_backend.db import get_session
 
 router = APIRouter()
@@ -49,3 +51,45 @@ def list_parameters(
 ) -> list[ParameterCatalogRowOut]:
     _load_model_row(session, model_id)
     return parameter_catalog_rows(session, model_id, program_name, gear_label, direction, channel_name)
+
+
+@router.patch("/models/{model_id}/programs/{program_name}/limit-configs/{stat_name}/threshold")
+def update_threshold(
+    model_id: str,
+    program_name: str,
+    stat_name: str,
+    gear_label: str = Query(...),
+    direction: str = Query(...),
+    channel_name: str = Query("vib_a"),
+    body: LimitConfigThresholdUpdate = Body(...),
+    session: Session = Depends(get_session),
+) -> ParameterCatalogRowOut:
+    """The real system's Limit Config.vi "Save" button after an operator
+    tunes THRESHOLD_LOW/HIGH -- writes just those two columns on the
+    matching LimitConfigRow, leaves the LIMIT band untouched, and returns
+    the row's refreshed ParameterCatalogRowOut so the client can update in
+    place without a separate GET."""
+    _load_model_row(session, model_id)
+    updated = update_limit_config_threshold(
+        session, model_id, program_name, gear_label, direction, channel_name, stat_name,
+        threshold_low=body.threshold_low, threshold_high=body.threshold_high,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"no limit config for model={model_id!r} program={program_name!r} "
+                f"gear={gear_label!r} direction={direction!r} channel={channel_name!r} stat={stat_name!r}"
+            ),
+        )
+
+    # Return the same shape the list endpoint uses so the client can drop
+    # the response straight into its row-by-stat_name lookup.
+    rows = parameter_catalog_rows(session, model_id, program_name, gear_label, direction, channel_name)
+    for row in rows:
+        if row.stat_name == stat_name:
+            return row
+    # Impossible in practice (we just updated a row that exists), but keep
+    # the exhaustive branch honest.
+    raise HTTPException(status_code=500, detail=f"stat {stat_name!r} missing from refreshed catalog rows")

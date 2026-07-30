@@ -6,6 +6,55 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 09:15 UTC — Threshold tuning: PATCH endpoint + inline editing in both clients
+
+First **write endpoint** in the backend (everything before this was
+read-only). Wires up the real system's *Limit Config.vi "Save"* button in
+both clients: the operator types a tuned THRESHOLD margin into the
+Master Entry parameter table and the backend persists just those two
+columns (`THRESHOLD_LOW`/`THRESHOLD_HIGH`) on the matching
+`LimitConfigRow` — leaves the LIMIT band and everything else untouched.
+
+- **Schema**: new `nvh_api_schemas.catalog.LimitConfigThresholdUpdate`
+  (two `float` fields). No `REPORT_SCHEMA_VERSION` bump — its docstring
+  scopes that version to the analysis-engine→report-shape boundary,
+  which this isn't part of.
+- **Backend**:
+  - `catalog_service.update_limit_config_threshold()` — writes just the
+    two threshold columns + `updated_at`, returns the refreshed
+    `LimitConfigRow` (or `None` for an unknown row).
+  - `PATCH /models/{model_id}/programs/{program_name}/limit-configs/{stat_name}/threshold`
+    endpoint on `models.router` — returns the refreshed
+    `ParameterCatalogRowOut` for the row so clients can drop the
+    response straight into their in-place lookup.
+  - CORS `allow_methods` widened from `["GET"]` to `["GET", "PATCH"]`.
+  - 5 new tests in `test_models_router.py`: threshold-only column
+    update, persistence across a fresh GET, 404 for unknown stat name,
+    404 for unknown model, 422 for a missing body field.
+- **web-frontend**: `api.patchThreshold(...)` (via a new `patchJson`
+  helper). `MasterEntry.tsx` gains two editable `<input>` columns
+  (`threshold_low`/`threshold_high`); on blur/Enter the value is
+  parsed, PATCHed, and the returned `ParameterCatalogRowOut` swapped in
+  so the visible cell matches DB state (server may round/normalize).
+  Escape reverts; a save failure shows an alarm-red border and restores
+  the last-committed value.
+- **qt-app**: `ApiClient.patch_threshold(...)` (built on
+  `QNetworkAccessManager.sendCustomRequest("PATCH", …)`, cross-version-
+  safe since PySide's older `.patch()` sugar isn't consistent).
+  `MasterEntryScreen` gains two new columns backed by
+  `_ThresholdEditor(QLineEdit)` cell widgets — `QDoubleValidator`,
+  `editingFinished` triggers the PATCH, Escape reverts, save failure
+  restores the pre-edit value from the local cache.
+  `FakeApiClient` grows a `patch_threshold_calls` log + configurable
+  response so widget-level tests can assert the PATCH body without a
+  live backend.
+- **Tests**: 5 new qt-app tests round out the 6 total on
+  `MasterEntryScreen` (editor presence, PATCH round-trip with local
+  state update, revert-on-failure). Full cross-package suite:
+  **196/196 passing.**
+
+---
+
 ## 2026-07-29 18:30 UTC — M1: Live Display streaming via ZeroMQ → WebSocket
 
 Second (and final for this milestone's Report GUI scope) M1 slice: wired

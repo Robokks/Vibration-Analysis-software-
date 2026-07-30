@@ -712,6 +712,69 @@ root/`web-backend`/`web-frontend`/`qt-app` READMEs to reflect all three
 screens being wired now (no longer "Live Display still a placeholder"),
 and pushed.
 
+### Turn — "next thing do": threshold tuning (first write endpoint)
+
+**User:** "next thing do" — pick the next item off the M1 remaining list
+and just do it.
+
+**Assistant:** picked threshold tuning: the real system's *Limit
+Config.vi "Save"* button behavior, and the first write endpoint in the
+backend (everything before this was read-only). The Master Entry screen
+in both GUIs already reads the parameter catalog with `threshold_low`/
+`threshold_high` — this closes the loop by letting an operator type new
+threshold values and persist them.
+
+Built it in one straight pass through the stack:
+
+- **Schema layer** — `nvh_api_schemas.catalog.LimitConfigThresholdUpdate`
+  (two `float` body fields). Deliberately did *not* bump
+  `REPORT_SCHEMA_VERSION` — that version's docstring scopes it to the
+  analysis-engine→report-shape boundary, which a DB-catalog write
+  endpoint isn't part of.
+- **Backend service + endpoint** — `catalog_service.update_limit_config_threshold()`
+  writes just `THRESHOLD_LOW`/`THRESHOLD_HIGH` + `updated_at` on the
+  matching `LimitConfigRow` (LIMIT band and everything else stay
+  untouched, mirroring the real Save button's scope); returns `None`
+  for an unknown row so the router can raise its own descriptive 404.
+  New `PATCH /models/{model_id}/programs/{program_name}/limit-configs/
+  {stat_name}/threshold` on `models.router` returns the refreshed
+  `ParameterCatalogRowOut` so the client can drop the response straight
+  into its lookup without a follow-up GET. CORS `allow_methods` widened
+  from `["GET"]` to `["GET", "PATCH"]`.
+- **Backend tests** — 5 new tests in `test_models_router.py`:
+  updates-only-the-threshold-columns (asserts LIMIT band, master,
+  in-table-config all unchanged), persistence across a fresh GET, 404
+  for an unknown stat name, 404 for an unknown model, 422 for a missing
+  body field. All 10/10 pass.
+- **web-frontend** — new `patchJson` helper + `api.patchThreshold(...)`.
+  `MasterEntry.tsx` refactored: the parameter table's static rendering
+  moved into a `ParameterTable`+`ParameterRowView`+`ThresholdCell`
+  component tree, with the two threshold columns rendered as
+  `<input>` fields wired to blur/Enter → PATCH → replace local row
+  from the server's response. Escape reverts; save failure paints an
+  alarm-red border and restores the pre-edit text.
+- **qt-app** — `ApiClient.patch_threshold(...)` built on
+  `QNetworkAccessManager.sendCustomRequest("PATCH", …)` (older
+  PySide builds don't expose a `.patch()` sugar consistently, so the
+  custom-request escape hatch is safer). `MasterEntryScreen` gains two
+  new columns backed by a `_ThresholdEditor(QLineEdit)` cell widget
+  with `QDoubleValidator`; `editingFinished` triggers the PATCH,
+  Escape reverts, save failure restores the last-committed value from
+  the local `_rows_by_stat` cache.
+- **Testing plumbing** — `FakeApiClient` grew a
+  `patch_threshold_calls` log + configurable response so widget-level
+  tests can assert both the URL/body and the reactive state update
+  without a live backend. Five new qt-app tests (editor presence with
+  initial values, PATCH round-trip with local state update,
+  revert-on-failure) round out the six on `MasterEntryScreen`.
+
+Ran the full cross-package suite: **196/196 passing** (was 188 pre-
+threshold-work; +5 backend PATCH tests, +3 net qt-app tests after
+absorbing the existing test into the expanded set). Web-frontend
+typechecks and builds cleanly (259 kB bundle, no size regression worth
+mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
+and pushed.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)

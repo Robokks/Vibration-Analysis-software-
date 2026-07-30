@@ -12,6 +12,9 @@ class FakeApiClient:
     def __init__(self, responses: dict[str, Any] | None = None, fail: frozenset[str] = frozenset()) -> None:
         self._responses = responses or {}
         self._fail = fail
+        # Test-visible log of every PATCH the code under test issued -- lets
+        # a test assert the URL/body it built without needing a live server.
+        self.patch_threshold_calls: list[dict[str, Any]] = []
 
     def _respond(self, key: str, on_success, on_error) -> None:
         if key in self._fail:
@@ -53,3 +56,27 @@ class FakeApiClient:
         self, model_id, gear_label, direction, stat_name, on_success, on_error, program_name=None, channel_name="vib_a"
     ) -> None:
         self._respond("fetch_summary_report", on_success, on_error)
+
+    def patch_threshold(
+        self, model_id, program_name, stat_name, gear_label, direction,
+        threshold_low, threshold_high, on_success, on_error, channel_name="vib_a",
+    ) -> None:
+        self.patch_threshold_calls.append({
+            "model_id": model_id, "program_name": program_name, "stat_name": stat_name,
+            "gear_label": gear_label, "direction": direction, "channel_name": channel_name,
+            "threshold_low": threshold_low, "threshold_high": threshold_high,
+        })
+        if "patch_threshold" in self._fail:
+            on_error(f"stubbed failure for patch_threshold")
+            return
+        # Return the shape a real ParameterCatalogRowOut echoes back, honoring
+        # whatever the caller just sent -- lets tests verify the round-trip.
+        response = self._responses.get("patch_threshold")
+        if response is None:
+            response = {
+                "stat_name": stat_name, "order_number": None, "master": None,
+                "limit_low": None, "limit_high": None,
+                "threshold_low": threshold_low, "threshold_high": threshold_high,
+                "included_in_table_config": False,
+            }
+        on_success(response)

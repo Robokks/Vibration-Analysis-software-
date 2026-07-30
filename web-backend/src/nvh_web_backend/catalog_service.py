@@ -134,3 +134,34 @@ def table_config_for(session: Session, model_id: str, program_name: str, channel
         ),
         included_parameters=frozenset(row.stat_name for row in parameter_rows),
     )
+
+
+def update_limit_config_threshold(
+    session: Session,
+    model_id: str,
+    program_name: str,
+    gear_label: str,
+    direction: str,
+    channel_name: str,
+    stat_name: str,
+    threshold_low: float,
+    threshold_high: float,
+    updated_at: str,
+) -> LimitConfigRow | None:
+    """Updates just the THRESHOLD_LOW/HIGH columns of the matching
+    LimitConfigRow, leaving the LIMIT band (imported from the master) and
+    every other column untouched -- matches the real system's Limit
+    Config.vi "Save" button after an operator tunes the margin. Returns
+    None (not a KeyError/HTTPException) if the row doesn't exist so the
+    router can raise its own 404 with a descriptive message."""
+    row = session.get(
+        LimitConfigRow,
+        (model_id, program_name, gear_label, direction, channel_name, stat_name),
+    )
+    if row is None:
+        return None
+    row.threshold_low = threshold_low
+    row.threshold_high = threshold_high
+    row.updated_at = updated_at
+    session.commit()
+    return row

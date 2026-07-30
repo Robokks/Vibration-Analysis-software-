@@ -22,3 +22,13 @@ class ParameterCatalogRowOut(BaseModel):
     threshold_low: float | None = None
     threshold_high: float | None = None
     included_in_table_config: bool
+
+
+class LimitConfigThresholdUpdate(BaseModel):
+    """Body for the PATCH /models/{...}/limit-configs/{stat_name}/threshold
+    endpoint -- matches the real system's Limit Config.vi "Save" button
+    persisting an operator-tuned THRESHOLD margin (see Phase C notes in
+    docs/data-contract.md for what THRESHOLD_LOW/HIGH mean physically)."""
+
+    threshold_low: float
+    threshold_high: float

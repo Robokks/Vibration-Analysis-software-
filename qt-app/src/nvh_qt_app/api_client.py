@@ -42,6 +42,25 @@ class ApiClient:
         query = f"?{urlencode(params)}" if params else ""
         request = QNetworkRequest(QUrl(f"{self._base_url}{path}{query}"))
         reply = self._manager.get(request)
+        self._track(reply, on_success, on_error)
+
+    def _patch(
+        self,
+        path: str,
+        body: dict[str, Any],
+        on_success: OnSuccess,
+        on_error: OnError,
+        params: dict[str, str] | None = None,
+    ) -> None:
+        query = f"?{urlencode(params)}" if params else ""
+        request = QNetworkRequest(QUrl(f"{self._base_url}{path}{query}"))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        # QNAM has no dedicated .patch() on older PySide builds -- sendCustomRequest
+        # is the documented cross-version escape hatch.
+        reply = self._manager.sendCustomRequest(request, b"PATCH", json.dumps(body).encode("utf-8"))
+        self._track(reply, on_success, on_error)
+
+    def _track(self, reply: QNetworkReply, on_success: OnSuccess, on_error: OnError) -> None:
         self._in_flight.add(reply)
 
         def _handle() -> None:
@@ -125,3 +144,24 @@ class ApiClient:
         if program_name:
             params["program_name"] = program_name
         self._get(f"/models/{quote(model_id)}/summary", on_success, on_error, params)
+
+    def patch_threshold(
+        self,
+        model_id: str,
+        program_name: str,
+        stat_name: str,
+        gear_label: str,
+        direction: str,
+        threshold_low: float,
+        threshold_high: float,
+        on_success: OnSuccess,
+        on_error: OnError,
+        channel_name: str = "vib_a",
+    ) -> None:
+        path = (
+            f"/models/{quote(model_id)}/programs/{quote(program_name)}"
+            f"/limit-configs/{quote(stat_name)}/threshold"
+        )
+        params = {"gear_label": gear_label, "direction": direction, "channel_name": channel_name}
+        body = {"threshold_low": threshold_low, "threshold_high": threshold_high}
+        self._patch(path, body, on_success, on_error, params)

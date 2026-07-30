@@ -234,6 +234,31 @@ async function getJson<T>(path: string, params?: Record<string, string | undefin
   return (await response.json()) as T;
 }
 
+async function patchJson<T>(
+  path: string,
+  body: unknown,
+  params?: Record<string, string | undefined>,
+): Promise<T> {
+  const url = new URL(path, API_BASE_URL);
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined) url.searchParams.set(key, value);
+  }
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, url.toString(), `Network error reaching ${path} (is the backend running?)`);
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, url.toString(), `${path} responded ${response.status} ${response.statusText}`);
+  }
+  return (await response.json()) as T;
+}
+
 const seg = encodeURIComponent;
 
 export const api = {
@@ -270,6 +295,22 @@ export const api = {
       program_name: opts.programName,
       channel_name: opts.channelName ?? "vib_a",
     }),
+  patchThreshold: (
+    modelId: string,
+    programName: string,
+    statName: string,
+    opts: { gearLabel: string; direction: string; channelName?: string },
+    body: { threshold_low: number; threshold_high: number },
+  ) =>
+    patchJson<ParameterRow>(
+      `/models/${seg(modelId)}/programs/${seg(programName)}/limit-configs/${seg(statName)}/threshold`,
+      body,
+      {
+        gear_label: opts.gearLabel,
+        direction: opts.direction,
+        channel_name: opts.channelName ?? "vib_a",
+      },
+    ),
 };
 
 // ---- realtime shapes (nvh_api_schemas.realtime) ----

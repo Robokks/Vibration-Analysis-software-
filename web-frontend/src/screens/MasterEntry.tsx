@@ -1,4 +1,5 @@
-import { api } from "../lib/api";
+import { useEffect, useState } from "react";
+import { ApiError, api, type ParameterRow } from "../lib/api";
 import { useApiResource } from "../lib/useApi";
 import { AsyncSection } from "../components/AsyncSection";
 import { DemoDataNote } from "../components/DemoDataNote";
@@ -96,56 +97,177 @@ export function MasterEntry() {
       <Panel>
         <SectionTitle>Master &amp; limit parameters</SectionTitle>
         <AsyncSection state={parametersState}>
-          {(rows) => (
-            <table className="w-full border-collapse font-mono text-xs">
-              <thead>
-                <tr className="text-left text-dark-secondaryText">
-                  <th className="border-b border-graticule pb-2 pr-4">Parameter</th>
-                  <th className="border-b border-graticule pb-2 pr-4">Order</th>
-                  <th className="border-b border-graticule pb-2 pr-4">Mean</th>
-                  <th className="border-b border-graticule pb-2 pr-4">Band</th>
-                  <th className="border-b border-graticule pb-2 pr-4">Full scale</th>
-                  <th className="border-b border-graticule pb-2 pr-4">Trials</th>
-                  <th className="border-b border-graticule pb-2 pr-4">Limit lo/hi</th>
-                  <th className="border-b border-graticule pb-2">In table</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.stat_name}>
-                    <td className="border-b border-graticule/40 py-2 pr-4 text-white">{row.stat_name}</td>
-                    <td className="border-b border-graticule/40 py-2 pr-4">
-                      {row.order_number !== null ? row.order_number.toPrecision(4) : "—"}
-                    </td>
-                    <td className="border-b border-graticule/40 py-2 pr-4">
-                      {row.master ? row.master.mean_value.toPrecision(4) : "—"}
-                    </td>
-                    <td className="border-b border-graticule/40 py-2 pr-4">
-                      {row.master
-                        ? `${row.master.band_min.toPrecision(3)}–${row.master.band_max.toPrecision(3)}`
-                        : "—"}
-                    </td>
-                    <td className="border-b border-graticule/40 py-2 pr-4">
-                      {row.master ? row.master.full_scale.toPrecision(3) : "—"}
-                    </td>
-                    <td className="border-b border-graticule/40 py-2 pr-4">
-                      {row.master ? row.master.trial_count : "—"}
-                    </td>
-                    <td className="border-b border-graticule/40 py-2 pr-4">
-                      {row.limit_low !== null && row.limit_high !== null
-                        ? `${row.limit_low.toPrecision(3)} / ${row.limit_high.toPrecision(3)}`
-                        : "—"}
-                    </td>
-                    <td className="border-b border-graticule/40 py-2 text-dark-secondaryText">
-                      {row.included_in_table_config ? "yes" : "no"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          {(rows) => <ParameterTable initialRows={rows} />}
         </AsyncSection>
       </Panel>
     </div>
+  );
+}
+
+// Threshold columns are inline-editable -- mirrors the real system's Limit
+// Config.vi screen where the operator types the tuned margin and hits Save.
+// On blur we PATCH the backend and swap in the returned row so the visual
+// state matches DB state (server may round or clip the value).
+function ParameterTable({ initialRows }: { initialRows: ParameterRow[] }) {
+  const [rows, setRows] = useState(initialRows);
+  useEffect(() => {
+    setRows(initialRows);
+  }, [initialRows]);
+
+  const applyRow = (updated: ParameterRow) => {
+    setRows((current) => current.map((r) => (r.stat_name === updated.stat_name ? updated : r)));
+  };
+
+  return (
+    <table className="w-full border-collapse font-mono text-xs">
+      <thead>
+        <tr className="text-left text-dark-secondaryText">
+          <th className="border-b border-graticule pb-2 pr-4">Parameter</th>
+          <th className="border-b border-graticule pb-2 pr-4">Order</th>
+          <th className="border-b border-graticule pb-2 pr-4">Mean</th>
+          <th className="border-b border-graticule pb-2 pr-4">Band</th>
+          <th className="border-b border-graticule pb-2 pr-4">Full scale</th>
+          <th className="border-b border-graticule pb-2 pr-4">Trials</th>
+          <th className="border-b border-graticule pb-2 pr-4">Limit lo/hi</th>
+          <th className="border-b border-graticule pb-2 pr-4">Threshold lo</th>
+          <th className="border-b border-graticule pb-2 pr-4">Threshold hi</th>
+          <th className="border-b border-graticule pb-2">In table</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <ParameterRowView key={row.stat_name} row={row} onUpdated={applyRow} />
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+type ThresholdField = "threshold_low" | "threshold_high";
+
+function ParameterRowView({
+  row,
+  onUpdated,
+}: {
+  row: ParameterRow;
+  onUpdated: (row: ParameterRow) => void;
+}) {
+  return (
+    <tr>
+      <td className="border-b border-graticule/40 py-2 pr-4 text-white">{row.stat_name}</td>
+      <td className="border-b border-graticule/40 py-2 pr-4">
+        {row.order_number !== null ? row.order_number.toPrecision(4) : "—"}
+      </td>
+      <td className="border-b border-graticule/40 py-2 pr-4">
+        {row.master ? row.master.mean_value.toPrecision(4) : "—"}
+      </td>
+      <td className="border-b border-graticule/40 py-2 pr-4">
+        {row.master
+          ? `${row.master.band_min.toPrecision(3)}–${row.master.band_max.toPrecision(3)}`
+          : "—"}
+      </td>
+      <td className="border-b border-graticule/40 py-2 pr-4">
+        {row.master ? row.master.full_scale.toPrecision(3) : "—"}
+      </td>
+      <td className="border-b border-graticule/40 py-2 pr-4">
+        {row.master ? row.master.trial_count : "—"}
+      </td>
+      <td className="border-b border-graticule/40 py-2 pr-4">
+        {row.limit_low !== null && row.limit_high !== null
+          ? `${row.limit_low.toPrecision(3)} / ${row.limit_high.toPrecision(3)}`
+          : "—"}
+      </td>
+      <ThresholdCell row={row} field="threshold_low" onUpdated={onUpdated} />
+      <ThresholdCell row={row} field="threshold_high" onUpdated={onUpdated} />
+      <td className="border-b border-graticule/40 py-2 text-dark-secondaryText">
+        {row.included_in_table_config ? "yes" : "no"}
+      </td>
+    </tr>
+  );
+}
+
+function ThresholdCell({
+  row,
+  field,
+  onUpdated,
+}: {
+  row: ParameterRow;
+  field: ThresholdField;
+  onUpdated: (row: ParameterRow) => void;
+}) {
+  const stored = row[field];
+  const editable = stored !== null;
+  const [draft, setDraft] = useState(stored !== null ? String(stored) : "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(stored !== null ? String(stored) : "");
+    setError(null);
+  }, [stored]);
+
+  if (!editable) {
+    return <td className="border-b border-graticule/40 py-2 pr-4 text-dark-secondaryText">—</td>;
+  }
+
+  const commit = async () => {
+    const parsed = Number(draft);
+    if (!Number.isFinite(parsed)) {
+      setError("not a number");
+      setDraft(String(stored));
+      return;
+    }
+    if (parsed === stored) return;
+    setError(null);
+    setSaving(true);
+    try {
+      const body = {
+        threshold_low: field === "threshold_low" ? parsed : (row.threshold_low ?? 0),
+        threshold_high: field === "threshold_high" ? parsed : (row.threshold_high ?? 0),
+      };
+      const updated = await api.patchThreshold(
+        MODEL_ID,
+        PROGRAM_NAME,
+        row.stat_name,
+        { gearLabel: GEAR_LABEL, direction: DIRECTION, channelName: CHANNEL_NAME },
+        body,
+      );
+      onUpdated(updated);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "save failed";
+      setError(message);
+      setDraft(String(stored));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <td className="border-b border-graticule/40 py-2 pr-4">
+      <input
+        type="text"
+        inputMode="decimal"
+        className={[
+          "w-24 rounded border bg-dark-background px-2 py-1 font-mono text-xs text-white",
+          "focus:outline-none focus:ring-1 focus:ring-dark-accentSecondary",
+          error ? "border-dark-alarm" : "border-graticule",
+          saving ? "opacity-60" : "",
+        ].join(" ")}
+        value={draft}
+        disabled={saving}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            setDraft(String(stored));
+            setError(null);
+            e.currentTarget.blur();
+          }
+        }}
+        title={error ?? undefined}
+      />
+    </td>
   );
 }
