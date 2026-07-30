@@ -79,10 +79,20 @@ scripts/install_local.sh          # Linux / macOS
 scripts\install_local.bat         # Windows
 ```
 
+> **Activate the venv first.** The commands below assume your venv is
+> active — the prompt shows `(.venv)` or `(venv)`. Activate with
+> `. .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\activate`
+> (Windows PowerShell). Once active, `python`, `pip`, and the console
+> scripts (`nvh-sim`, `nvh-web-backend`, `nvh-qt-app`) all resolve on
+> `PATH` — you do NOT prefix them with `.venv/bin/` on Linux or
+> `.venv\Scripts\` on Windows. Do not paste `.venv/bin/nvh-sim` into
+> PowerShell — that's a Linux path and Windows will report
+> `CommandNotFoundException`.
+
 ## Run the end-to-end analysis demo
 
 ```bash
-.venv/bin/nvh-sim --trials 30 --out report.json
+nvh-sim --trials 30 --out report.json
 ```
 
 Builds a master signature from 30 simulated known-good units for gear R, then
@@ -92,7 +102,7 @@ through the full analysis pipeline, printing PASS/FAIL for each.
 ## Seed a persisted demo dataset
 
 ```bash
-.venv/bin/python web-backend/scripts/seed_demo_data.py --data-root ./data/nvh_demo --trials 30
+python web-backend/scripts/seed_demo_data.py --data-root ./data/nvh_demo --trials 30
 ```
 
 Writes Parquet files under `./data/nvh_demo/` and a SQLite DB
@@ -104,20 +114,23 @@ Writes Parquet files under `./data/nvh_demo/` and a SQLite DB
 ```bash
 # terminal 1 -- the live-stream producer (ZeroMQ PUB); optional for
 # Master Entry / Reports, required to see Live Display do anything
-.venv/bin/python web-backend/scripts/live_simulator.py
+python web-backend/scripts/live_simulator.py
 
 # terminal 2 -- the FastAPI backend (serves the DB + relays the ZMQ
 # stream to /live/ws)
-NVH_DB_URL="sqlite:///./data/nvh_demo/nvh_demo.db" .venv/bin/nvh-web-backend
+#   Linux / macOS:
+NVH_DB_URL="sqlite:///./data/nvh_demo/nvh_demo.db" nvh-web-backend
+#   Windows PowerShell (env var is a separate statement):
+$env:NVH_DB_URL = "sqlite:///./data/nvh_demo/nvh_demo.db"; nvh-web-backend
 ```
 
 Then, in another terminal: `cd web-frontend && npm run dev` (Vite dev
-server, `http://localhost:5173`), or `.venv/bin/nvh-qt-app` (desktop). Both
+server, `http://localhost:5173`), or `nvh-qt-app` (desktop). Both
 clients' Master Entry and Reports screens will show the seeded demo data.
 
 ## Run the tests
 
 ```bash
-.venv/bin/python -m pytest analysis-engine/tests simulator/tests libs/nvh_contract/tests \
+python -m pytest analysis-engine/tests simulator/tests libs/nvh_contract/tests \
   libs/nvh_api_schemas/tests design-tokens/tests web-backend/tests qt-app/tests -q
 ```
