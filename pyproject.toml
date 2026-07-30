@@ -1,2 +1,24 @@
+# Workspace-root marker.
+#
+# This file exists so PyCharm (and uv, hatch, and other project-aware
+# tools) treat the repository root as the ONE Python project. Without
+# it, PyCharm scans down the tree, finds a pyproject.toml inside every
+# sub-package (qt-app/, web-backend/, analysis-engine/, ...), and on
+# Windows will happily offer to create a per-subfolder `.venv\` for
+# each one. Those sub-venvs are empty of our own packages, so any
+# `Run 'app.py'` inside a subfolder crashes with
+# `ModuleNotFoundError: No module named 'nvh_design_tokens'`.
+#
+# This file has a [project] section but no [build-system], so pip
+# treats it as non-installable -- `pip install .` here is deliberately
+# a no-op. All actual packages live in the sub-directories and are
+# installed with `pip install -e ...` (see README.md).
+
+[project]
+name = "nvh-workspace"
+version = "0.0.0"
+description = "NVH end-of-line test system -- monorepo workspace root (not an installable package; see sub-packages)."
+requires-python = ">=3.10"
+
 [tool.pytest.ini_options]
 python_classes = ["*Tests"]

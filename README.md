@@ -91,14 +91,29 @@ under `qt-app/src/nvh_qt_app/` will crash with:
 ModuleNotFoundError: No module named 'nvh_design_tokens'
 ```
 
-Point PyCharm at the ONE root venv instead:
+The root `pyproject.toml` declares a `[project]` section so PyCharm
+recognises the *repository root* as the single Python project, which
+mostly prevents the trap on fresh clones. If your project already has
+stray sub-venvs, clean them up with the helper script and re-point the
+interpreter:
+
+```bash
+scripts\fix_pycharm.bat        # Windows
+scripts/fix_pycharm.sh         # Linux / macOS
+```
+
+Then in PyCharm:
 
 1. **File → Settings → Project: Vibration-Analysis-software- → Python Interpreter**
 2. Gear icon → **Add Interpreter → Add Local Interpreter… → Existing**
 3. Browse to
    `...\Vibration-Analysis-software-\.venv\Scripts\python.exe`
    (the root `.venv`, not `qt-app\.venv` or `web-backend\.venv`)
-4. OK. Any stray per-subfolder `.venv\` directories can then be deleted.
+4. OK.
+
+`scripts\install_local.bat` also refuses to run if the active venv
+isn't the repository-root one, so you can't silently install packages
+into the wrong sub-venv.
 
 > **Activate the venv first.** The commands below assume your venv is
 > active — the prompt shows `(.venv)` or `(venv)`. Activate with

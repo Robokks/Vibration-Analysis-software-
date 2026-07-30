@@ -16,6 +16,32 @@ REM Pass --dev to also install pytest via requirements-dev.txt.
 setlocal
 cd /d "%~dp0\.."
 
+REM Refuse to run if the active venv looks like a per-subfolder venv
+REM (PyCharm on Windows sometimes creates qt-app\.venv\ etc.). Installing
+REM into one of those silently is the exact trap this script is trying
+REM to keep users out of.
+if defined VIRTUAL_ENV (
+    echo VIRTUAL_ENV=%VIRTUAL_ENV%
+    echo %VIRTUAL_ENV% | findstr /I /C:"%CD%\.venv" >nul
+    if errorlevel 1 (
+        echo.
+        echo Active venv is not the repository-root venv.
+        echo Expected:  %CD%\.venv
+        echo Got:       %VIRTUAL_ENV%
+        echo.
+        echo Deactivate the current venv, activate the root one with
+        echo    .venv\Scripts\activate
+        echo and re-run this script. To clean up stray per-subfolder venvs
+        echo PyCharm may have made, run scripts\fix_pycharm.bat.
+        exit /b 1
+    )
+) else (
+    echo.
+    echo No VIRTUAL_ENV set -- activate the root venv first:
+    echo    .venv\Scripts\activate
+    exit /b 1
+)
+
 python -m pip install --upgrade pip
 if errorlevel 1 goto :fail
 
