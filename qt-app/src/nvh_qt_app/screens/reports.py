@@ -16,6 +16,7 @@ from nvh_design_tokens import load_tokens
 from ..api_client import ApiClient
 from ..widgets.gear_glyph import StampWidget
 from ..widgets.labels import MonoLabel, SectionTitle
+from ..widgets.multi_series_plot import MultiSeriesPlot
 from ..widgets.panel import Panel
 
 # Same demo-dataset scoping story as MasterEntryScreen -- one model/program/
@@ -27,7 +28,6 @@ DIRECTION = "RU"
 SUMMARY_STAT_NAME = "RMS Avg"
 
 _DETAILED_COLUMNS = ["Stat", "Domain", "Observed", "Master mean", "G-level", "OK/NOK"]
-_SUMMARY_COLUMNS = ["Serial number", "Value"]
 _CODE_RESULT_COLUMNS = [
     "Step", "Gear/Direction", "Channel", "Parameter", "Orders", "Low", "Actual", "High", "Unit", "OK/NOK",
 ]
@@ -74,14 +74,20 @@ class ReportsScreen(QWidget):
 
         self._tabs = QTabWidget()
         self._consolidated_stamp: StampWidget | None = None
-        self._consolidated_panel, self._consolidated_stamps_row, self._consolidated_detail = self._build_consolidated_tab()
+        (
+            self._consolidated_panel,
+            self._consolidated_stamps_row,
+            self._consolidated_detail,
+            self._order_spectrum_plot,
+            self._order_tracking_plot,
+        ) = self._build_consolidated_tab()
         self._detailed_table = _make_table(_DETAILED_COLUMNS)
-        self._summary_table = _make_table(_SUMMARY_COLUMNS)
+        self._summary_panel, self._xchart_plot, self._summary_meta = self._build_summary_tab()
         self._code_result_table = _make_table(_CODE_RESULT_COLUMNS)
 
         self._tabs.addTab(self._consolidated_panel, "Consolidated")
         self._tabs.addTab(self._wrap(self._detailed_table), "Detailed")
-        self._tabs.addTab(self._wrap(self._summary_table), "Summary")
+        self._tabs.addTab(self._summary_panel, "Summary")
         self._tabs.addTab(self._wrap(self._code_result_table), "Code-Result")
         layout.addWidget(self._tabs)
 
@@ -94,15 +100,53 @@ class ReportsScreen(QWidget):
         panel_layout.addWidget(table)
         return panel
 
-    def _build_consolidated_tab(self) -> tuple[Panel, QHBoxLayout, MonoLabel]:
+    def _build_consolidated_tab(self):
         panel = Panel()
         layout = QVBoxLayout(panel)
         stamps_row = QHBoxLayout()
         layout.addLayout(stamps_row)
         detail_label = MonoLabel("")
         layout.addWidget(detail_label)
+
+        # Order spectrum + order tracking, side-by-side below the stamp.
+        # Both use MultiSeriesPlot with a single series each -- the shape
+        # of the array is what matters, exact X labels are future work.
+        plots_row = QHBoxLayout()
+        plots_row.setSpacing(12)
+
+        spec_plot = MultiSeriesPlot(["Order magnitude"], max_samples=4096)
+        spec_plot.setMinimumHeight(220)
+        spec_panel = Panel()
+        spec_layout = QVBoxLayout(spec_panel)
+        spec_layout.addWidget(SectionTitle("Order spectrum"))
+        spec_layout.addWidget(spec_plot)
+        plots_row.addWidget(spec_panel, stretch=1)
+
+        track_plot = MultiSeriesPlot(["Order tracking"], max_samples=4096)
+        track_plot.setMinimumHeight(220)
+        track_panel = Panel()
+        track_layout = QVBoxLayout(track_panel)
+        track_layout.addWidget(SectionTitle("Order tracking"))
+        track_layout.addWidget(track_plot)
+        plots_row.addWidget(track_panel, stretch=1)
+
+        layout.addLayout(plots_row)
         layout.addStretch(1)
-        return panel, stamps_row, detail_label
+        return panel, stamps_row, detail_label, spec_plot, track_plot
+
+    def _build_summary_tab(self):
+        panel = Panel()
+        layout = QVBoxLayout(panel)
+        layout.addWidget(SectionTitle(f"SPC X-chart — {SUMMARY_STAT_NAME}"))
+
+        plot = MultiSeriesPlot([SUMMARY_STAT_NAME], max_samples=1024)
+        plot.setMinimumHeight(320)
+        layout.addWidget(plot)
+
+        meta = MonoLabel("(no test runs)")
+        layout.addWidget(meta)
+        layout.addStretch(1)
+        return panel, plot, meta
 
     def _on_test_runs(self, runs: list[dict]) -> None:
         self._run_combo.blockSignals(True)
@@ -159,6 +203,17 @@ class ReportsScreen(QWidget):
             lines.append(f"fail reasons: {', '.join(result['fail_reason_codes'])}")
         self._consolidated_detail.setText("\n".join(lines))
 
+        # Fill the two plots from the analysis-engine arrays. These are
+        # already downsampled/decimated by the report builder so pushing
+        # everything is safe.
+        order_spectrum = result.get("order_spectrum") or {}
+        magnitude = order_spectrum.get("magnitude") or []
+        self._order_spectrum_plot.set_series_data("Order magnitude", magnitude)
+
+        order_tracking = result.get("order_tracking") or {}
+        tracking_magnitude = order_tracking.get("magnitude") or []
+        self._order_tracking_plot.set_series_data("Order tracking", tracking_magnitude)
+
     def _on_detailed(self, payload: dict) -> None:
         rows = payload["numeric_table"]
         table = self._detailed_table
@@ -178,14 +233,38 @@ class ReportsScreen(QWidget):
                 table.setItem(r, c, QTableWidgetItem(text))
 
     def _on_summary(self, payload: dict) -> None:
-        rows = payload["rows"]
+        # X-chart: one value per test run, with dashed reference lines at
+        # the SPC center_line / UCL / LCL. Autoscale picks the range from
+        # the values + the reference lines together, so the CL sits inside
+        # the visible band even if all values happen to cluster far away.
         values = payload["xchart"]["values"]
-        table = self._summary_table
-        table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            table.setItem(r, 0, QTableWidgetItem(row["test_run"]["serial_number"]))
-            value = values[r] if r < len(values) else None
-            table.setItem(r, 1, QTableWidgetItem("" if value is None else f"{value:.4g}"))
+        center = payload["xchart"]["center_line"]
+        ucl = payload["xchart"]["ucl"]
+        lcl = payload["xchart"]["lcl"]
+        self._xchart_plot.set_series_data(SUMMARY_STAT_NAME, values)
+        self._xchart_plot.set_reference_lines(SUMMARY_STAT_NAME, [
+            (center, "CL"),
+            (ucl, "UCL"),
+            (lcl, "LCL"),
+        ])
+        # Ensure the reference lines are inside the visible band --
+        # autoscale by default only looks at the buffer, so push those
+        # bounds if any are outside.
+        cfg = self._xchart_plot.series_config(SUMMARY_STAT_NAME)
+        if values:
+            lo = min(min(values), lcl)
+            hi = max(max(values), ucl)
+            span = hi - lo if hi > lo else 1.0
+            cfg.manual_min = lo - span * 0.1
+            cfg.manual_max = hi + span * 0.1
+            cfg.autoscale = False
+
+        rows = payload["rows"]
+        ooc = payload["xchart"].get("out_of_control_indices") or []
+        self._summary_meta.setText(
+            f"{len(rows)} trial(s) — CL {center:.4g} / UCL {ucl:.4g} / LCL {lcl:.4g}"
+            + (f" · {len(ooc)} out-of-control" if ooc else "")
+        )
 
     def _on_code_result(self, payload: dict) -> None:
         rows = payload["rows"]

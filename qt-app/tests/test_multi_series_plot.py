@@ -70,3 +70,18 @@ class MultiSeriesPlotTests:
         plot.clear()
         assert len(plot.series_config("A").buffer) == 0
         assert len(plot.series_config("B").buffer) == 0
+
+    def test_set_series_data_replaces_the_buffer(self, qapp):
+        plot = MultiSeriesPlot(["A"], max_samples=100)
+        plot.push_sample("A", 999.0)
+        plot.set_series_data("A", [1.0, 2.0, 3.0])
+        assert list(plot.series_config("A").buffer) == [1.0, 2.0, 3.0]
+
+    def test_set_reference_lines_stores_labels(self, qapp):
+        plot = MultiSeriesPlot(["A"], max_samples=10)
+        plot.set_reference_lines("A", [(0.5, "CL"), (1.0, "UCL"), (0.0, "LCL")])
+        assert plot.series_config("A").reference_lines == [
+            (0.5, "CL"), (1.0, "UCL"), (0.0, "LCL"),
+        ]
+        plot.set_reference_lines("A", [])
+        assert plot.series_config("A").reference_lines == []

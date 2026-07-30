@@ -54,7 +54,11 @@ _DEFAULT_TRACE_COLORS = (
 @dataclass
 class SeriesConfig:
     """One trace's rendering + scaling state. Everything except the
-    color has a runtime-editable equivalent via the context menu."""
+    color has a runtime-editable equivalent via the context menu.
+
+    ``reference_lines`` are extra dashed horizontal marks drawn in
+    the plot area at fixed y-values on this series' scale -- used by
+    the Reports Summary X-chart for center_line / UCL / LCL."""
 
     name: str
     color: QColor
@@ -65,6 +69,7 @@ class SeriesConfig:
     line_width: float = 1.5
     antialiased: bool = True
     buffer: deque[float] = field(default_factory=lambda: deque(maxlen=2000))
+    reference_lines: list[tuple[float, str]] = field(default_factory=list)
 
     def range(self) -> tuple[float, float]:
         """Effective y-range for this series -- either the buffer's
@@ -117,6 +122,30 @@ class MultiSeriesPlot(GraticuleWidget):
         if cfg is None:
             return
         cfg.buffer.append(float(value))
+        self.update()
+
+    def set_series_data(self, name: str, values: list[float] | tuple[float, ...]) -> None:
+        """Replace the named series' buffer with a fixed sequence -- used
+        by the Reports side to plot an already-computed array (order
+        spectrum, order tracking, SPC X-chart) rather than push samples
+        one at a time."""
+        cfg = self._series.get(name)
+        if cfg is None:
+            return
+        cfg.buffer.clear()
+        for v in values:
+            cfg.buffer.append(float(v))
+        self.update()
+
+    def set_reference_lines(self, name: str, lines: list[tuple[float, str]]) -> None:
+        """Set the named series' reference lines (each a (y_value, label)
+        pair). Painted as dashed horizontal marks in the plot area at
+        that y position on the series' current scale. Pass an empty
+        list to clear."""
+        cfg = self._series.get(name)
+        if cfg is None:
+            return
+        cfg.reference_lines = list(lines)
         self.update()
 
     def clear(self) -> None:
@@ -243,11 +272,21 @@ class MultiSeriesPlot(GraticuleWidget):
 
     @staticmethod
     def _format_tick(value: float) -> str:
-        if abs(value) >= 1000:
+        # Rough magnitude buckets so ticks stay readable across the wide
+        # value range this plot sees (rpm in the thousands down to FFT
+        # magnitudes in the 1e-3 range on the same widget).
+        if value == 0.0:
+            return "0"
+        magnitude = abs(value)
+        if magnitude >= 1000:
             return f"{value:.0f}"
-        if abs(value) >= 10:
+        if magnitude >= 10:
             return f"{value:.1f}"
-        return f"{value:.2f}"
+        if magnitude >= 0.1:
+            return f"{value:.2f}"
+        if magnitude >= 0.001:
+            return f"{value:.4f}"
+        return f"{value:.2e}"
 
     def _draw_trace(
         self,
@@ -256,10 +295,19 @@ class MultiSeriesPlot(GraticuleWidget):
         plot_left: int, plot_right: int,
         plot_top: int, plot_bottom: int,
     ) -> None:
-        if len(cfg.buffer) < 2:
-            return
         lo, hi = cfg.range()
         span = hi - lo if hi > lo else 1.0
+
+        # Reference lines: dashed horizontal marks, painted before the
+        # trace so the trace sits on top. Uses a muted version of the
+        # series color so it doesn't compete visually with the trace.
+        if cfg.reference_lines:
+            self._draw_reference_lines(
+                painter, cfg, lo, span, plot_left, plot_right, plot_top, plot_bottom,
+            )
+
+        if len(cfg.buffer) < 2:
+            return
         pen = QPen(cfg.color)
         pen.setWidthF(cfg.line_width)
         painter.setPen(pen)
@@ -274,6 +322,32 @@ class MultiSeriesPlot(GraticuleWidget):
             y = plot_bottom - ((value - lo) / span) * (plot_bottom - plot_top)
             polygon.append(QPointF(x, y))
         painter.drawPolyline(polygon)
+
+    def _draw_reference_lines(
+        self,
+        painter: QPainter,
+        cfg: SeriesConfig,
+        lo: float, span: float,
+        plot_left: int, plot_right: int,
+        plot_top: int, plot_bottom: int,
+    ) -> None:
+        fm = QFontMetrics(self._label_font())
+        muted = QColor(cfg.color)
+        muted.setAlphaF(0.6)
+        pen = QPen(muted)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        pen.setWidthF(1.0)
+        painter.setPen(pen)
+        painter.setFont(self._label_font())
+        for y_value, label in cfg.reference_lines:
+            y = plot_bottom - ((y_value - lo) / span) * (plot_bottom - plot_top)
+            if y < plot_top or y > plot_bottom:
+                continue
+            painter.drawLine(plot_left, int(y), plot_right, int(y))
+            # Right-aligned label a few px from the plot's right edge.
+            text = f"{label} {self._format_tick(y_value)}"
+            text_w = fm.horizontalAdvance(text)
+            painter.drawText(plot_right - text_w - 4, int(y) - 2, text)
 
     def _draw_cursor(
         self,

@@ -775,6 +775,68 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — "update to report also"
+
+**User:** "update to report aslo" -- extend the multi-Y-axis plot
+treatment I just did on Live Display into the Reports screen too.
+
+**Assistant:** two natural places in Reports for plots:
+- Consolidated tab already carries `order_spectrum` and
+  `order_tracking` (order/magnitude and time_s/magnitude arrays)
+  in the report payload -- currently ignored, just shown as a
+  point-count line in the text summary.
+- Summary tab is currently a plain 2-column serial+value table --
+  the `xchart` payload carries center_line/UCL/LCL/values that
+  are exactly what an SPC X-chart draws.
+
+Built both, plus the plot-widget extensions to support them:
+
+- **MultiSeriesPlot.set_series_data(name, values)** -- sugar over
+  `clear + push_sample in a loop`, so a fixed array can populate
+  the buffer directly. Both the order-spectrum plot and the X-chart
+  plot use it.
+- **MultiSeriesPlot.set_reference_lines(name, [(y, label), ...])**
+  -- dashed horizontal marks painted in the plot area at those
+  y-values on the series' current scale, with right-aligned labels
+  drawn just above the line. Muted alpha (0.6) on the series color
+  so the reference lines don't compete with the primary trace.
+- **Consolidated tab** now has a two-column row of plots below the
+  stamp + fault text: "Order spectrum" (left) + "Order tracking"
+  (right). Both are single-series MultiSeriesPlot with the
+  magnitude array from the payload piped in.
+- **Summary tab** rebuild: replaced the QTableWidget with a
+  MultiSeriesPlot showing the RMS Avg X-chart values plus three
+  reference lines (CL / UCL / LCL). Autoscale is overridden with
+  a manual range that includes both the values AND the control
+  limits, so the CL always sits inside the visible band even if
+  all trial values happen to cluster far from it. A MonoLabel
+  below the plot shows "N trial(s) — CL X / UCL Y / LCL Z" +
+  any out-of-control count.
+
+Small fix caught while screenshotting: the order-spectrum ticks
+initially all rendered as "0.00" because the underlying FFT
+magnitudes are in the 0.01-0.03 range and my `_format_tick`
+formatter fell back to `.2f`. Extended the formatter with more
+magnitude buckets: `.4f` down to 1e-3, then scientific notation
+below that.
+
+Testing: two new widget tests
+(`test_set_series_data_replaces_the_buffer` and
+`test_set_reference_lines_stores_labels`), rewrote the summary tab
+screen test to assert on `_xchart_plot.series_config` buffer +
+reference_lines instead of the removed `_summary_table`, added a
+`test_consolidated_tab_populates_order_plots` for the two order
+plots. Full cross-package suite: **230/230 passing.**
+
+Screenshotted all four Report tabs against a running backend.
+Consolidated shows the FAIL stamp + fault text + two live order
+plots (dense spectrum on the left, smoother tracking curve on the
+right). Summary shows the SPC X-chart with three dashed reference
+lines and a real trend across the 3 seeded test runs.
+
+Sent to the user, updated PROGRESS.md, wrote this transcript
+entry, committed, pushed.
+
 ### Turn — "graph scale configuration / plot configuration / cursor / multiple y scale"
 
 **User** attached two photos of the real LabVIEW system:

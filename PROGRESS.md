@@ -6,6 +6,42 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 17:15 UTC — Qt Reports: plots on Consolidated + Summary tabs
+
+Extended the multi-Y-axis plot pattern into the Reports screen:
+
+- **Consolidated tab** — below the PASS/FAIL stamp + fault-detection
+  text, two side-by-side plots wired to the report's actual arrays:
+  `order_spectrum.magnitude` (dense FFT-like view on the left) and
+  `order_tracking.magnitude` (amplitude vs. time on the right).
+  Both use MultiSeriesPlot with a single series each.
+- **Summary tab** — replaced the plain 2-column serial+value table
+  with a proper SPC X-chart: MultiSeriesPlot showing the RMS Avg
+  trend across trials, with three dashed horizontal reference lines
+  at the SPC center_line (CL), UPPER control limit (UCL), and LOWER
+  control limit (LCL) computed by the analysis engine. Autoscale is
+  overridden with a manual range that includes both the values and
+  the control limits, so the CL always sits inside the visible band.
+- **MultiSeriesPlot extensions** used to make both work:
+  - `set_series_data(name, values)` — replace a series' buffer with
+    a fixed array (used for both order arrays + the X-chart values).
+  - `set_reference_lines(name, [(y, label), ...])` — dashed
+    horizontal marks in the plot area at those y-values on the
+    series' scale, with right-aligned labels ("CL 0.92", "UCL 2.22",
+    "LCL -0.38"). Muted alpha on the series color so they don't
+    compete visually with the primary trace.
+  - `_format_tick` improved to keep readable labels down to 1e-3
+    magnitude and switch to scientific below that (the order
+    spectrum used to render all ticks as "0.00" because raw FFT
+    magnitudes hover in the 0.01-0.03 range).
+- New tests: `test_set_series_data_replaces_the_buffer`,
+  `test_set_reference_lines_stores_labels`. Rewrote the summary tab
+  test to assert on the plot buffer + reference lines instead of the
+  removed table. Added a consolidated-plot population test. Full
+  cross-package suite: **230/230 passing.**
+
+---
+
 ## 2026-07-30 16:30 UTC — Qt Computed sub-tab: multi-Y-axis plot with cursor + config menu
 
 Replaced the numeric-readout `LiveStatsPanel` on the Computed sub-tab

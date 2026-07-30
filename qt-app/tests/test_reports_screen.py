@@ -17,6 +17,8 @@ _CONSOLIDATED = {
         "gear_label": "R", "direction": "RU",
         "crash_noise": {"peak_band_rms": 0.47, "threshold": 0.5, "detected": False},
         "slippage": {"min_ratio": 0.0002, "dropout_fraction": 0.0, "detected": False},
+        "order_spectrum": {"order": [0, 1, 2, 3, 4], "magnitude": [0.1, 0.5, 0.3, 0.2, 0.1]},
+        "order_tracking": {"time_s": [0, 0.1, 0.2, 0.3], "magnitude": [0.4, 0.5, 0.6, 0.7]},
         "fail_reason_codes": [], "passed": True,
     },
 }
@@ -87,12 +89,27 @@ class ReportsScreenTests:
         assert screen._code_result_table.item(0, 1).text() == "R_RU"
         assert screen._code_result_table.item(0, 9).text() == "OK"
 
-    def test_summary_tab_populates_table(self, qapp):
+    def test_consolidated_tab_populates_order_plots(self, qapp):
         fake = FakeApiClient(_RESPONSES)
         screen = ReportsScreen(api_client=fake)
 
-        assert screen._summary_table.rowCount() == 1
-        assert screen._summary_table.item(0, 0).text() == "DEMO-HEALTHY-UNIT"
+        spec = screen._order_spectrum_plot.series_config("Order magnitude")
+        track = screen._order_tracking_plot.series_config("Order tracking")
+        assert list(spec.buffer) == [0.1, 0.5, 0.3, 0.2, 0.1]
+        assert list(track.buffer) == [0.4, 0.5, 0.6, 0.7]
+
+    def test_summary_tab_populates_xchart_and_reference_lines(self, qapp):
+        fake = FakeApiClient(_RESPONSES)
+        screen = ReportsScreen(api_client=fake)
+
+        cfg = screen._xchart_plot.series_config("RMS Avg")
+        assert list(cfg.buffer) == [0.80]
+        # Reference lines carry CL / UCL / LCL in that order.
+        lines = dict((label, y) for y, label in cfg.reference_lines)
+        assert lines["CL"] == 0.91
+        assert lines["UCL"] == 2.18
+        assert lines["LCL"] == -0.36
+        assert "CL 0.91" in screen._summary_meta.text() or "0.91" in screen._summary_meta.text()
 
     def test_shows_error_status_on_backend_failure(self, qapp):
         fake = FakeApiClient({}, fail=frozenset({"fetch_test_runs"}))
