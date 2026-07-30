@@ -6,6 +6,41 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 14:20 UTC — Qt Live Display: bottom table -> (gear x direction) results grid
+
+User shared a photo of the real LabVIEW NVH TEST SCREEN.vi to clarify
+what the bottom table should look like: rows are per-(gear, direction)
+combos (R_RU / R_RD / I_RU / I_RD / ... / IV_RD in the real screen),
+columns are Gear ID + Result (colored PASS/FAIL fill) + one column per
+graded parameter (RMS max / PK max / Kurtosis max / IN_H1(dB m/s2) /
+IN_H1(g)). Result cell is green on PASS, red on FAIL, empty until the
+DC completes -- the color IS the value, matching the LabVIEW screen.
+
+Replaced the previous "Live parameter catalog" table with this
+`Live results grid`:
+
+- Rows are seeded from `_DEFAULT_GEAR_LABELS` (R/I/II/III/IV/V) on
+  first paint, then reseeded from the real model's gear labels once
+  the `fetch_model` reply lands (excluding neutral N since it doesn't
+  have a graded step). Two rows per gear (RU / RD) matching the real
+  screen's convention.
+- `_paint_result_cell(gear, direction, stamp)` fills the Result cell
+  green (`pass` token) on PASS, red (`alarm` token) on FAIL. The
+  matching (gear, direction) row is found in O(1) via a
+  `_row_index[(gear, direction)] -> row` lookup built at seed time.
+- Parameter columns stay empty for now -- the live event stream
+  carries `stamp` and `fail_reason_codes` but not per-parameter
+  values, so those cells will fill in once the DC-complete event
+  starts carrying the full grading result (or once the analysis
+  engine streams per-parameter values mid-run). This mirrors the
+  real system's mid-run state where Result is known but detailed
+  columns aren't yet.
+- Two new tests: seeds one row per (gear, direction) pair from the
+  fetched model; dc-event paints the matching Result cell with the
+  pass token color. Full qt-app suite: **27/27 passing.**
+
+---
+
 ## 2026-07-30 13:45 UTC — Qt Live Display rebuild: toolbar + nested tabs + status bar
 
 Rebuilt the qt-app Live Display screen to match the real system's

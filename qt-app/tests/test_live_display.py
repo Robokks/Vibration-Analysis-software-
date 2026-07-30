@@ -1,28 +1,22 @@
 """Widget-level tests for the rebuilt LiveDisplayScreen: toolbar,
-tabs, parameter table, and 9-field bottom status bar. Driven by
-FakeLiveClient + FakeApiClient so there's no live backend or WebSocket."""
+tabs, (gear x direction) results grid, and 9-field bottom status bar.
+Driven by FakeLiveClient + FakeApiClient so there's no live backend or
+WebSocket."""
 
 from nvh_qt_app.screens.live_display import LiveDisplayScreen
 from nvh_qt_app.widgets.live_toolbar import _TOOLBAR_ACTIONS
 
 from fakes import FakeApiClient, FakeLiveClient
 
-_PARAMETERS = [
-    {
-        "stat_name": "RMS Avg", "order_number": None,
-        "master": None,
-        "limit_low": 0.74, "limit_high": 0.81,
-        "threshold_low": 0.0, "threshold_high": 0.0,
-        "included_in_table_config": True,
-    },
-    {
-        "stat_name": "IN_H1(g)", "order_number": 12.0,
-        "master": None,
-        "limit_low": 0.92, "limit_high": 1.03,
-        "threshold_low": 0.0, "threshold_high": 0.0,
-        "included_in_table_config": False,
-    },
-]
+_MODEL = {
+    "model_id": "MODEL-A", "model_name": "Nano 4 Speed",
+    "drive_teeth": {"R": 12, "I": 24}, "idler_teeth_1": {},
+    "idler_teeth_2": {}, "layshaft_teeth": {},
+    "drive_shaft_bearing_roll": {}, "layshaft_bearing_roll": {},
+    "fdr_teeth": {}, "fd_sel": {},
+    # Two gears so we get 4 rows (I_RU / I_RD / R_RU / R_RD after sort).
+    "ratios": {"R": 3.753, "I": 2.5},
+}
 
 _TEST_RUN_DETAIL = {
     "test_run": {
@@ -38,7 +32,7 @@ _TEST_RUN_DETAIL = {
 
 
 def _make_screen():
-    api = FakeApiClient({"fetch_parameters": _PARAMETERS, "fetch_test_run": _TEST_RUN_DETAIL})
+    api = FakeApiClient({"fetch_model": _MODEL, "fetch_test_run": _TEST_RUN_DETAIL})
     live = FakeLiveClient()
     screen = LiveDisplayScreen(live_client=live, api_client=api)
     return screen, api, live
@@ -61,10 +55,26 @@ class LiveDisplayScreenTests:
         assert screen._plot_tabs.tabText(0) == "Time series"
         assert screen._plot_tabs.tabText(1) == "Frequency domain"
 
-    def test_parameter_table_populates_from_api(self, qapp):
+    def test_results_grid_seeds_one_row_per_gear_direction_pair(self, qapp):
         screen, _api, _live = _make_screen()
-        assert screen._param_table.rowCount() == len(_PARAMETERS)
-        assert screen._param_table.item(0, 0).text() == "RMS Avg"
+        # Model has R + I -> sorted: I, R -> 4 rows (I_RU, I_RD, R_RU, R_RD).
+        assert screen._results_table.rowCount() == 4
+        gear_ids = [screen._results_table.item(r, 0).text() for r in range(4)]
+        assert gear_ids == ["I_RU", "I_RD", "R_RU", "R_RD"]
+
+    def test_dc_event_colors_the_matching_result_cell(self, qapp):
+        screen, _api, live = _make_screen()
+        live.emit_event({
+            "type": "dc", "dc_id": "d1", "test_run_id": "run-42",
+            "station_id": "STATION-1", "gear_label": "R", "direction": "RU",
+            "stamp": "PASS", "fail_reason_codes": [],
+        })
+        r_ru_row = next(
+            r for r in range(screen._results_table.rowCount())
+            if screen._results_table.item(r, 0).text() == "R_RU"
+        )
+        cell = screen._results_table.item(r_ru_row, 1)
+        assert cell.background().color().name().lower() == screen._pass.lower()
 
     def test_test_run_event_fetches_detail_and_fills_status_bar(self, qapp):
         screen, _api, live = _make_screen()

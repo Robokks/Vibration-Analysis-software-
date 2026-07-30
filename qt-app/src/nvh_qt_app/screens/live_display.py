@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem,
     QTabWidget, QVBoxLayout, QWidget,
@@ -55,7 +56,22 @@ _PLACEHOLDER = "—"
 # LabVIEW PLC boundary: NVH_ID enum for direction (see docs/data-contract).
 _DIRECTION_NVH_ID: dict[str, int] = {"RU": 0, "STYD": 1, "STYC": 2, "RD": 3}
 
-_PARAMETER_TABLE_COLUMNS = ("Parameter", "Order", "Limit low", "Limit high", "In table")
+# Results-grid layout: rows are (gear, direction) pairs, columns are one
+# graded-parameter each. Matches the real system's NVH TEST SCREEN.vi
+# table (see docs -- Gear ID / Result / RMS max / PK max / Kurtosis /
+# IN_H1(dB m/s2) / IN_H1(g)). Result cell paints pass-green / alarm-red
+# once the DC completes; parameter cells stay em-dash until the live
+# stream starts carrying per-parameter values.
+_RESULT_TABLE_COLUMNS = (
+    "Gear ID", "Result",
+    "RMS max (m/s2)", "PK max (dB m/s2)", "Kurtosis max",
+    "IN_H1(dB m/s2)", "IN_H1(g)",
+)
+_RESULT_TABLE_DIRECTIONS = ("RU", "RD")
+# Fallback gear list if the model fetch hasn't completed yet -- matches
+# the real gearbox's non-neutral gears so the table isn't empty during
+# the first paint.
+_DEFAULT_GEAR_LABELS = ("R", "I", "II", "III", "IV", "V")
 
 
 class LiveDisplayScreen(QWidget):
@@ -81,6 +97,9 @@ class LiveDisplayScreen(QWidget):
         self._station_id = _DEFAULT_STATION
         self._test_run_id: str | None = None
         self._test_run_status: str | None = None
+        # (gear_label, direction) -> row index in the results table, so a
+        # dc event can find the right row in O(1) without walking cells.
+        self._row_index: dict[tuple[str, str], int] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -110,13 +129,18 @@ class LiveDisplayScreen(QWidget):
         self._plot_tabs.addTab(self._build_frequency_domain_tab(), "Frequency domain")
         layout.addWidget(self._plot_tabs, stretch=1)
 
-        # --- bottom parameter table ---------------------------------
+        # --- bottom results table -----------------------------------
+        # Rebuilt to match the real NVH TEST SCREEN.vi table: one row per
+        # (gear_label, direction) step, columns for the row-scoped
+        # grading parameters, Result cell colored green/red as DC events
+        # arrive. See _populate_results_rows() for the row-set derivation.
         table_panel = Panel()
         table_panel_layout = QVBoxLayout(table_panel)
         table_panel_layout.setContentsMargins(16, 12, 16, 12)
-        table_panel_layout.addWidget(SectionTitle("Live parameter catalog"))
-        self._param_table = self._build_parameter_table()
-        table_panel_layout.addWidget(self._param_table)
+        table_panel_layout.addWidget(SectionTitle("Live results grid"))
+        self._results_table = self._build_results_table()
+        self._populate_results_rows(_DEFAULT_GEAR_LABELS)
+        table_panel_layout.addWidget(self._results_table)
         layout.addWidget(table_panel)
 
         # --- bottom status bar --------------------------------------
@@ -130,11 +154,9 @@ class LiveDisplayScreen(QWidget):
 
         # --- API + live-stream clients -----------------------------
         self._api = api_client if api_client is not None else ApiClient()
-        self._api.fetch_parameters(
-            _MODEL_ID, _PROGRAM_NAME, _GEAR_LABEL, _DIRECTION,
-            self._on_parameters, self._on_api_error,
-            channel_name=_CHANNEL_NAME,
-        )
+        # Fetch the model so we can seed the results grid with the real
+        # gearbox's gear labels rather than the hardcoded default.
+        self._api.fetch_model(_MODEL_ID, self._on_model, self._on_api_error)
 
         self._client = live_client if live_client is not None else LiveClient()
         self._client.on_event = self._on_event
@@ -191,18 +213,44 @@ class LiveDisplayScreen(QWidget):
         wrap.addWidget(widget)
         return container
 
-    def _build_parameter_table(self) -> QTableWidget:
-        table = QTableWidget(0, len(_PARAMETER_TABLE_COLUMNS))
-        table.setHorizontalHeaderLabels(list(_PARAMETER_TABLE_COLUMNS))
+    def _build_results_table(self) -> QTableWidget:
+        table = QTableWidget(0, len(_RESULT_TABLE_COLUMNS))
+        table.setHorizontalHeaderLabels(list(_RESULT_TABLE_COLUMNS))
         table.verticalHeader().setVisible(False)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        table.setMaximumHeight(180)
+        table.setMaximumHeight(220)
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        for col in range(1, len(_PARAMETER_TABLE_COLUMNS)):
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        for col in range(2, len(_RESULT_TABLE_COLUMNS)):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         return table
+
+    def _populate_results_rows(self, gear_labels: tuple[str, ...] | list[str]) -> None:
+        """Seed the results grid with one row per (gear, direction) pair
+        drawn from the model's gear labels. Row order matches the real
+        LabVIEW screen (all gears asc, RU before RD)."""
+        table = self._results_table
+        # Match the LabVIEW screen's convention: skip neutral (N) since
+        # neutral doesn't have a graded acquisition step, and emit RU
+        # before RD within each gear group.
+        gears = [g for g in gear_labels if g != "N"]
+        rows: list[tuple[str, str]] = [
+            (gear, direction) for gear in gears for direction in _RESULT_TABLE_DIRECTIONS
+        ]
+        table.setRowCount(len(rows))
+        self._row_index.clear()
+        for r, (gear, direction) in enumerate(rows):
+            self._row_index[(gear, direction)] = r
+            gear_id_item = QTableWidgetItem(f"{gear}_{direction}")
+            gear_id_item.setForeground(QBrush(QColor(self._accent_secondary)))
+            table.setItem(r, 0, gear_id_item)
+            # All other cells start empty -- Result colors in on a dc
+            # event, parameter cells fill in once the stream carries
+            # per-parameter values.
+            for c in range(1, len(_RESULT_TABLE_COLUMNS)):
+                table.setItem(r, c, QTableWidgetItem(""))
 
     # --- toolbar action handling ------------------------------------
 
@@ -216,19 +264,12 @@ class LiveDisplayScreen(QWidget):
 
     # --- REST callbacks ---------------------------------------------
 
-    def _on_parameters(self, rows: list[dict]) -> None:
-        table = self._param_table
-        table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            values = [
-                row.get("stat_name", ""),
-                "" if row.get("order_number") is None else f"{row['order_number']:.4g}",
-                "" if row.get("limit_low") is None else f"{row['limit_low']:.4g}",
-                "" if row.get("limit_high") is None else f"{row['limit_high']:.4g}",
-                "yes" if row.get("included_in_table_config") else "no",
-            ]
-            for c, text in enumerate(values):
-                table.setItem(r, c, QTableWidgetItem(text))
+    def _on_model(self, model: dict) -> None:
+        """Reseed the results grid from the real gearbox's gear labels
+        (sorted). Runs once after the initial fetch_model completes."""
+        gears = tuple(sorted(model.get("ratios", {}).keys()))
+        if gears:
+            self._populate_results_rows(gears)
 
     def _on_test_run_detail(self, payload: dict[str, Any]) -> None:
         test_run = payload.get("test_run") or {}
@@ -301,6 +342,28 @@ class LiveDisplayScreen(QWidget):
         self._status_bar.set_field("gear_id", gear)
         self._status_bar.set_field("nvh_id", _DIRECTION_NVH_ID.get(direction, _PLACEHOLDER))
         self._status_bar.set_field("result", stamp)
+        # Also color the matching row in the results grid. Unknown
+        # (gear, direction) pairs (e.g. STYD/STYC that this table doesn't
+        # show) are silently ignored -- the status bar still updated.
+        self._paint_result_cell(gear, direction, stamp)
+
+    def _paint_result_cell(self, gear: str, direction: str, stamp: str) -> None:
+        row = self._row_index.get((gear, direction))
+        if row is None:
+            return
+        item = self._results_table.item(row, 1)
+        if item is None:
+            item = QTableWidgetItem("")
+            self._results_table.setItem(row, 1, item)
+        color_hex = self._pass if stamp == "PASS" else self._alarm if stamp == "FAIL" else None
+        if color_hex is None:
+            item.setBackground(QBrush())
+            item.setText(stamp)
+            return
+        item.setBackground(QBrush(QColor(color_hex)))
+        # Empty text -- the color IS the value, matching the real
+        # LabVIEW screen's convention (green fill == PASS).
+        item.setText("")
 
     def _handle_signal_chunk(self, payload: dict[str, Any]) -> None:
         self._station_id = payload.get("station_id") or self._station_id

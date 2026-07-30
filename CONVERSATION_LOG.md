@@ -775,6 +775,68 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — reference photo of the real LabVIEW screen: "table data"
+
+**User** attached a phone photo of the actual `VIBR-O-MATIC ANALYZER
+[NVH TEST SCREEN.vi]` display and wrote "table data" -- clarifying what
+the bottom table should look like.
+
+The photo shows the real system's live-run table: rows are one per
+`{gear}_{direction}` pair (R_RU, R_RD, I_RU, I_RD, II_RU, II_RD, III_RU,
+III_RD, IV_RU, IV_RD -- 5 gears x 2 directions), columns are Gear ID +
+Result (green-filled cell when the DC has completed with PASS) + one
+column per graded parameter (RMS max (m/s2) / PK max (dB m/s2) /
+Kurtosis max / IN_H1(dB m/s2) / IN_H1(g) / more cut off). The top 8
+rows had green Result fills (already-tested); the bottom 2 (IV_RU,
+IV_RD) were still empty (not yet tested). Parameter columns were empty
+in the screenshot too -- looks like Result fills first, parameter cells
+later.
+
+**Assistant:** rebuilt the bottom table to match. Replaced the `Live
+parameter catalog` widget with a `Live results grid`:
+
+- Row set derives from the real model's gear labels via
+  `fetch_model()` -- reseeds when the fetch lands, uses a hardcoded
+  `R/I/II/III/IV/V` fallback for the first paint. Excludes neutral
+  (N) since it has no graded step. Two rows per gear: `{gear}_RU`
+  then `{gear}_RD`, matching the LabVIEW screen's row order.
+- Columns are the fixed 7-column set from the photo: Gear ID +
+  Result + RMS max (m/s2) + PK max (dB m/s2) + Kurtosis max +
+  IN_H1(dB m/s2) + IN_H1(g). Column headers match verbatim so a
+  future operator sees the same vocabulary as the LabVIEW screen.
+- Result cell is `QTableWidgetItem` with a `QBrush(QColor(...))`
+  background painted from the design tokens: `pass` (dark green)
+  on PASS, `alarm` (red) on FAIL, no background before the DC
+  completes. The text is intentionally empty when colored -- the
+  color IS the value, matching the LabVIEW screen exactly.
+- Row lookup uses a `_row_index[(gear, direction)] -> row_index` map
+  built once at seed time so a DC event finds the right row in O(1),
+  not by walking cells. Unknown (gear, direction) pairs (e.g. STYD /
+  STYC directions this table doesn't show) are silently ignored --
+  the bottom status bar still updates from those events.
+- Parameter columns stay empty for now: the live event stream carries
+  `stamp` + `fail_reason_codes` but not per-parameter values, so
+  RMS max / PK max / etc. can't fill until we extend either the DC
+  event to carry a numeric_table dict, or add per-chunk parameter
+  computation (RMS/peak/crest ARE already computed live in the
+  Computed panel -- could copy them into the grid's own-gear row in
+  a follow-up).
+
+Two new widget-level tests: `test_results_grid_seeds_one_row_per_
+gear_direction_pair` (mocks a 2-gear model, asserts 4 rows in
+alphabetical order I_RU, I_RD, R_RU, R_RD) and `test_dc_event_
+colors_the_matching_result_cell` (emits a PASS dc event for R_RU,
+checks the cell's background is the `pass` token hex). Full qt-app
+suite: **27/27 passing.** Screenshotted the live output against the
+running backend + simulator -- shows exactly the expected layout:
+7-column grid with R_RU and R_RD (only two rows because the demo
+seed has one gear), R_RU's Result cell painted red because the
+simulator's most recent DC completed with FAIL (crash-noise or
+slippage cycle).
+
+Sent the screenshot back to the user, updated PROGRESS.md, wrote
+this transcript entry, and pushed.
+
 ### Turn — "screen modification for qt" / Live Display rebuild spec
 
 **User:** "screen modification for qt" — ambiguous at first, so I asked
