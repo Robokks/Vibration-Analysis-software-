@@ -12,9 +12,11 @@ class FakeApiClient:
     def __init__(self, responses: dict[str, Any] | None = None, fail: frozenset[str] = frozenset()) -> None:
         self._responses = responses or {}
         self._fail = fail
-        # Test-visible log of every PATCH the code under test issued -- lets
-        # a test assert the URL/body it built without needing a live server.
+        # Test-visible logs of every PATCH the code under test issued --
+        # lets tests assert URL/body without a live server.
         self.patch_threshold_calls: list[dict[str, Any]] = []
+        self.patch_limit_calls: list[dict[str, Any]] = []
+        self.patch_table_config_calls: list[dict[str, Any]] = []
 
     def _respond(self, key: str, on_success, on_error) -> None:
         if key in self._fail:
@@ -69,8 +71,6 @@ class FakeApiClient:
         if "patch_threshold" in self._fail:
             on_error(f"stubbed failure for patch_threshold")
             return
-        # Return the shape a real ParameterCatalogRowOut echoes back, honoring
-        # whatever the caller just sent -- lets tests verify the round-trip.
         response = self._responses.get("patch_threshold")
         if response is None:
             response = {
@@ -78,5 +78,49 @@ class FakeApiClient:
                 "limit_low": None, "limit_high": None,
                 "threshold_low": threshold_low, "threshold_high": threshold_high,
                 "included_in_table_config": False,
+            }
+        on_success(response)
+
+    def patch_limit(
+        self, model_id, program_name, stat_name, gear_label, direction,
+        limit_low, limit_high, on_success, on_error, channel_name="vib_a",
+    ) -> None:
+        self.patch_limit_calls.append({
+            "model_id": model_id, "program_name": program_name, "stat_name": stat_name,
+            "gear_label": gear_label, "direction": direction, "channel_name": channel_name,
+            "limit_low": limit_low, "limit_high": limit_high,
+        })
+        if "patch_limit" in self._fail:
+            on_error(f"stubbed failure for patch_limit")
+            return
+        response = self._responses.get("patch_limit")
+        if response is None:
+            response = {
+                "stat_name": stat_name, "order_number": None, "master": None,
+                "limit_low": limit_low, "limit_high": limit_high,
+                "threshold_low": None, "threshold_high": None,
+                "included_in_table_config": False,
+            }
+        on_success(response)
+
+    def patch_table_config_parameter(
+        self, model_id, program_name, stat_name, gear_label, direction,
+        included, on_success, on_error, channel_name="vib_a",
+    ) -> None:
+        self.patch_table_config_calls.append({
+            "model_id": model_id, "program_name": program_name, "stat_name": stat_name,
+            "gear_label": gear_label, "direction": direction, "channel_name": channel_name,
+            "included": included,
+        })
+        if "patch_table_config_parameter" in self._fail:
+            on_error(f"stubbed failure for patch_table_config_parameter")
+            return
+        response = self._responses.get("patch_table_config_parameter")
+        if response is None:
+            response = {
+                "stat_name": stat_name, "order_number": None, "master": None,
+                "limit_low": None, "limit_high": None,
+                "threshold_low": None, "threshold_high": None,
+                "included_in_table_config": included,
             }
         on_success(response)

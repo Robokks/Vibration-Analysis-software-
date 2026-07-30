@@ -6,6 +6,52 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 11:20 UTC — LIMIT band edit + Table Config parameter toggle
+
+Second round of write endpoints, extending the threshold-tuning pattern:
+the operator can now override the LIMIT band directly (real Limit
+Config.vi "operator override" flow) and can add/remove a parameter from
+the program's Table Config with one click (Phase E's per-parameter
+inclusion checkbox).
+
+- **Schemas** (`nvh_api_schemas.catalog`): `LimitConfigLimitUpdate`
+  (mirrors `LimitConfigThresholdUpdate`) and `TableConfigParameterUpdate`
+  (`{included: bool}`). Still no `REPORT_SCHEMA_VERSION` bump — same
+  boundary-scope reasoning.
+- **Backend**:
+  - `catalog_service.update_limit_config_limit()` — writes just
+    LIMIT_LOW/HIGH on the matching row (symmetric with the threshold
+    service; THRESHOLD stays untouched).
+  - `catalog_service.set_table_config_parameter()` — idempotently
+    inserts/deletes a `TableConfigParameterRow`. Rejects a stat name
+    that isn't in `PARAMETER_CATALOG` (analysis engine's authoritative
+    list), so the toggle can't smuggle a phantom parameter into the
+    Table Config.
+  - Two new PATCH routes returning the refreshed
+    `ParameterCatalogRowOut`, with shared `_missing_limit_config_detail`
+    + `_refreshed_row` helpers so the three edit endpoints stay in
+    lockstep.
+  - 7 new tests: LIMIT updates only limit columns, LIMIT 404, LIMIT 422;
+    table-config toggle off/on, idempotent no-op, 404 for unknown stat,
+    422 for missing body field.
+- **web-frontend**: `MasterEntry.tsx`'s `ThresholdCell` generalized into
+  `NumericCell` that dispatches to `patchThreshold` vs `patchLimit`
+  based on which of the four field names it holds. New `InTableCell`
+  renders a token-driven pass-green / muted button that toggles the
+  Table Config membership. Parameter table now has **four** editable
+  numeric columns and a clickable inclusion toggle.
+- **qt-app**: `_ThresholdEditor` -> `_NumericEditor` with the same
+  `value_committed` signal now serving all four numeric columns.
+  New `_InTableToggle(QToolButton)` (checkable, token-driven pass/muted
+  color) replaces the static "yes"/"no" text cell. `ApiClient` gets
+  `patch_limit` + `patch_table_config_parameter`; `FakeApiClient` grows
+  matching call-logs and configurable responses.
+- **Testing**: 4 new qt-app tests (LIMIT dispatch, in-table dispatch,
+  revert on failure for both). Full cross-package suite: **206/206
+  passing** (was 196; 10 new — 7 backend + 3 net-new qt-app).
+
+---
+
 ## 2026-07-30 09:15 UTC — Threshold tuning: PATCH endpoint + inline editing in both clients
 
 First **write endpoint** in the backend (everything before this was

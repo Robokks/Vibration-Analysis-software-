@@ -3,8 +3,11 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
-    QHBoxLayout, QHeaderView, QLineEdit, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QHBoxLayout, QHeaderView, QLineEdit, QTableWidget, QTableWidgetItem,
+    QToolButton, QVBoxLayout, QWidget,
 )
+
+from nvh_design_tokens import load_tokens
 
 from ..api_client import ApiClient
 from ..widgets.labels import Chip, MonoLabel, SectionTitle
@@ -28,8 +31,21 @@ _PARAMETER_COLUMNS = [
     "Limit low", "Limit high", "Threshold low", "Threshold high", "In table",
 ]
 _COL_STAT_NAME = 0
+_COL_LIMIT_LOW = 5
+_COL_LIMIT_HIGH = 6
 _COL_THRESHOLD_LOW = 7
 _COL_THRESHOLD_HIGH = 8
+_COL_IN_TABLE = 9
+
+# Column -> (field key, PATCH method name on ApiClient). Order matters --
+# used both for rendering the editable cell widgets and for restoring one on
+# a failed PATCH from _restore_editor().
+_NUMERIC_EDIT_COLUMNS: tuple[tuple[int, str], ...] = (
+    (_COL_LIMIT_LOW, "limit_low"),
+    (_COL_LIMIT_HIGH, "limit_high"),
+    (_COL_THRESHOLD_LOW, "threshold_low"),
+    (_COL_THRESHOLD_HIGH, "threshold_high"),
+)
 
 
 class MasterEntryScreen(QWidget):
@@ -39,8 +55,12 @@ class MasterEntryScreen(QWidget):
         self._error_shown = False
         # stat_name -> latest ParameterCatalogRowOut dict, so a PATCH round
         # trip can restore the pre-edit cell value on failure and keep the
-        # "other" threshold's number when only one column changes.
+        # "other" column's number when only one column changes.
         self._rows_by_stat: dict[str, dict] = {}
+        palette = load_tokens()["color"]["palettes"]["dark"]
+        self._pass_color = palette["pass"]
+        self._alarm_color = palette["alarm"]
+        self._muted_color = palette["secondaryText"]
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -99,7 +119,7 @@ class MasterEntryScreen(QWidget):
         table = QTableWidget(0, len(_PARAMETER_COLUMNS))
         table.setHorizontalHeaderLabels(_PARAMETER_COLUMNS)
         table.verticalHeader().setVisible(False)
-        # No cell-level edit triggers -- the threshold columns get real
+        # No cell-level edit triggers -- the LIMIT/THRESHOLD columns get real
         # QLineEdit cell widgets instead so we can validate, catch
         # editing-finished, and paint feedback without shipping our own
         # QStyledItemDelegate.
@@ -143,79 +163,122 @@ class MasterEntryScreen(QWidget):
                 "" if not master else f"{master['mean_value']:.4g}",
                 "" if not master else f"{master['band_min']:.4g}",
                 "" if not master else f"{master['band_max']:.4g}",
-                "" if row.get("limit_low") is None else f"{row['limit_low']:.4g}",
-                "" if row.get("limit_high") is None else f"{row['limit_high']:.4g}",
             ]
             for c, text in enumerate(values):
                 table.setItem(r, c, QTableWidgetItem(text))
-            # Threshold columns get editable widgets when the row actually
-            # carries thresholds (LimitConfigRow exists); otherwise a plain
-            # em-dash placeholder like the display-only columns above.
-            for col, key in ((_COL_THRESHOLD_LOW, "threshold_low"),
-                              (_COL_THRESHOLD_HIGH, "threshold_high")):
+
+            for col, key in _NUMERIC_EDIT_COLUMNS:
                 stored = row.get(key)
                 if stored is None:
+                    table.setCellWidget(r, col, None)
                     table.setItem(r, col, QTableWidgetItem("—"))
                 else:
-                    editor = _ThresholdEditor(row["stat_name"], key, stored, self)
-                    editor.threshold_committed.connect(self._on_threshold_committed)
+                    editor = _NumericEditor(row["stat_name"], key, stored, self)
+                    editor.value_committed.connect(self._on_numeric_committed)
                     table.setCellWidget(r, col, editor)
-            # "In table" column shifts to the tail after the two new columns.
-            table.setItem(
-                r, len(_PARAMETER_COLUMNS) - 1,
-                QTableWidgetItem("yes" if row.get("included_in_table_config") else "no"),
+
+            button = _InTableToggle(
+                row["stat_name"], bool(row.get("included_in_table_config")),
+                self._pass_color, self._muted_color, self,
             )
+            button.toggled_by_user.connect(self._on_in_table_toggled)
+            table.setCellWidget(r, _COL_IN_TABLE, button)
         if not self._error_shown:
             self._status.setText(f"{len(rows)} parameters loaded")
 
-    def _on_threshold_committed(self, stat_name: str, field: str, new_value: float) -> None:
-        """Fires when the operator finishes typing in a threshold cell --
-        matches the real Limit Config.vi "Save" button. Sends the PATCH,
-        updates the local cache on success, restores the editor on failure."""
+    def _on_numeric_committed(self, stat_name: str, field: str, new_value: float) -> None:
+        """Fires when the operator finishes typing in a LIMIT or THRESHOLD
+        cell -- dispatches to the matching PATCH endpoint. Same shape as
+        the sibling web-frontend's NumericCell commit path."""
         row = self._rows_by_stat.get(stat_name)
         if row is None:
             return
-        threshold_low = new_value if field == "threshold_low" else row.get("threshold_low") or 0.0
-        threshold_high = new_value if field == "threshold_high" else row.get("threshold_high") or 0.0
         self._status.setText(f"saving {stat_name} {field}={new_value}…")
 
         def _on_success(updated: dict) -> None:
             self._rows_by_stat[stat_name] = updated
-            # Repaint just the two threshold editors from the server's
-            # response, in case the backend rounded/normalized either value.
+            # Repaint every editable cell in the row -- the server may have
+            # normalized a value we sent, and a PATCH to (e.g.) limit_low
+            # can leave threshold_* alone but the response is always the
+            # full row.
             table = self._param_table
             for r in range(table.rowCount()):
                 item = table.item(r, _COL_STAT_NAME)
                 if item is None or item.text() != stat_name:
                     continue
-                for col, key in ((_COL_THRESHOLD_LOW, "threshold_low"),
-                                  (_COL_THRESHOLD_HIGH, "threshold_high")):
+                for col, key in _NUMERIC_EDIT_COLUMNS:
                     widget = table.cellWidget(r, col)
-                    if isinstance(widget, _ThresholdEditor):
+                    if isinstance(widget, _NumericEditor):
                         widget.set_value(updated.get(key))
+                in_table = table.cellWidget(r, _COL_IN_TABLE)
+                if isinstance(in_table, _InTableToggle):
+                    in_table.set_included(bool(updated.get("included_in_table_config")))
                 break
-            self._status.setText(f"{stat_name} thresholds saved")
+            self._status.setText(f"{stat_name} {field} saved")
 
         def _on_failure(message: str) -> None:
             self._restore_editor(stat_name, field, row.get(field))
             self._status.setText(f"save failed for {stat_name} ({message})")
 
-        self._api.patch_threshold(
+        if field in ("limit_low", "limit_high"):
+            self._api.patch_limit(
+                MODEL_ID, PROGRAM_NAME, stat_name, GEAR_LABEL, DIRECTION,
+                new_value if field == "limit_low" else row.get("limit_low") or 0.0,
+                new_value if field == "limit_high" else row.get("limit_high") or 0.0,
+                _on_success, _on_failure, channel_name=CHANNEL_NAME,
+            )
+        else:
+            self._api.patch_threshold(
+                MODEL_ID, PROGRAM_NAME, stat_name, GEAR_LABEL, DIRECTION,
+                new_value if field == "threshold_low" else row.get("threshold_low") or 0.0,
+                new_value if field == "threshold_high" else row.get("threshold_high") or 0.0,
+                _on_success, _on_failure, channel_name=CHANNEL_NAME,
+            )
+
+    def _on_in_table_toggled(self, stat_name: str, included: bool) -> None:
+        """Fires when the operator clicks the 'In table' toggle -- posts to
+        the Table Config parameter inclusion endpoint. The server response
+        is the refreshed ParameterCatalogRowOut, which we mirror back into
+        the local cache and the button's visual state."""
+        row = self._rows_by_stat.get(stat_name)
+        previous = bool(row.get("included_in_table_config")) if row else not included
+        self._status.setText(f"saving {stat_name} in-table={included}…")
+
+        def _on_success(updated: dict) -> None:
+            self._rows_by_stat[stat_name] = updated
+            self._restore_in_table(stat_name, bool(updated.get("included_in_table_config")))
+            self._status.setText(f"{stat_name} in-table saved")
+
+        def _on_failure(message: str) -> None:
+            self._restore_in_table(stat_name, previous)
+            self._status.setText(f"save failed for {stat_name} ({message})")
+
+        self._api.patch_table_config_parameter(
             MODEL_ID, PROGRAM_NAME, stat_name, GEAR_LABEL, DIRECTION,
-            threshold_low, threshold_high, _on_success, _on_failure,
-            channel_name=CHANNEL_NAME,
+            included, _on_success, _on_failure, channel_name=CHANNEL_NAME,
         )
 
     def _restore_editor(self, stat_name: str, field: str, stored) -> None:
         table = self._param_table
-        col = _COL_THRESHOLD_LOW if field == "threshold_low" else _COL_THRESHOLD_HIGH
+        col = {name: col for col, name in _NUMERIC_EDIT_COLUMNS}[field]
         for r in range(table.rowCount()):
             item = table.item(r, _COL_STAT_NAME)
             if item is None or item.text() != stat_name:
                 continue
             widget = table.cellWidget(r, col)
-            if isinstance(widget, _ThresholdEditor):
+            if isinstance(widget, _NumericEditor):
                 widget.set_value(stored)
+            return
+
+    def _restore_in_table(self, stat_name: str, included: bool) -> None:
+        table = self._param_table
+        for r in range(table.rowCount()):
+            item = table.item(r, _COL_STAT_NAME)
+            if item is None or item.text() != stat_name:
+                continue
+            widget = table.cellWidget(r, _COL_IN_TABLE)
+            if isinstance(widget, _InTableToggle):
+                widget.set_included(included)
             return
 
     def _on_error(self, message: str) -> None:
@@ -223,13 +286,14 @@ class MasterEntryScreen(QWidget):
         self._status.setText(f"failed to reach backend: {message}")
 
 
-class _ThresholdEditor(QLineEdit):
-    """Inline QLineEdit for a single threshold cell -- commits on
-    editingFinished (Enter or focus-out), validates as a plain double,
-    keeps its own "last committed value" so an Escape or a failed PATCH can
-    revert without a re-fetch."""
+class _NumericEditor(QLineEdit):
+    """Inline QLineEdit for a single editable LIMIT or THRESHOLD cell --
+    commits on editingFinished (Enter or focus-out), validates as a plain
+    double, keeps its own "last committed value" so an Escape or a failed
+    PATCH can revert without a re-fetch. The screen dispatches to the
+    matching PATCH endpoint based on the `field` name."""
 
-    threshold_committed = Signal(str, str, float)
+    value_committed = Signal(str, str, float)
 
     def __init__(self, stat_name: str, field: str, initial: float, parent=None) -> None:
         super().__init__(parent)
@@ -267,7 +331,55 @@ class _ThresholdEditor(QLineEdit):
             return
         if parsed == self._committed:
             return
-        # Optimistically show the new value; the screen will call set_value()
-        # again from the PATCH response (or revert on failure).
         self._committed = parsed
-        self.threshold_committed.emit(self._stat_name, self._field, parsed)
+        self.value_committed.emit(self._stat_name, self._field, parsed)
+
+
+class _InTableToggle(QToolButton):
+    """Clickable 'In table' toggle -- one QToolButton per row, checkable,
+    labeled 'yes'/'no'. Uses the theme's `pass` (dark green) accent when
+    included, muted otherwise. Emits toggled_by_user only on real user
+    clicks (not on programmatic set_included calls) so the screen can
+    dispatch a PATCH without racing itself."""
+
+    toggled_by_user = Signal(str, bool)
+
+    def __init__(
+        self, stat_name: str, initial: bool,
+        pass_color: str, muted_color: str, parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._stat_name = stat_name
+        self._pass_color = pass_color
+        self._muted_color = muted_color
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.set_included(initial)
+        self.clicked.connect(self._on_clicked)
+
+    def set_included(self, included: bool) -> None:
+        # Block signals so set_included() called from a PATCH response
+        # doesn't recursively re-fire toggled_by_user.
+        self.blockSignals(True)
+        self.setChecked(included)
+        self.setText("yes" if included else "no")
+        color = self._pass_color if included else self._muted_color
+        self.setStyleSheet(
+            "QToolButton { "
+            f"color: {color}; "
+            "border: none; padding: 4px 12px; font-family: 'IBM Plex Mono', monospace; "
+            "font-size: 11px; }"
+        )
+        self.blockSignals(False)
+
+    def _on_clicked(self) -> None:
+        included = self.isChecked()
+        self.setText("yes" if included else "no")
+        color = self._pass_color if included else self._muted_color
+        self.setStyleSheet(
+            "QToolButton { "
+            f"color: {color}; "
+            "border: none; padding: 4px 12px; font-family: 'IBM Plex Mono', monospace; "
+            "font-size: 11px; }"
+        )
+        self.toggled_by_user.emit(self._stat_name, included)

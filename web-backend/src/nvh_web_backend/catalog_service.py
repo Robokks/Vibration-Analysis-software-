@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from analysis_engine.grading.limit_config import LimitConfigValue
 from analysis_engine.grading.master_builder import MasterSignatureStats
+from analysis_engine.grading.parameters import PARAMETER_CATALOG
 from analysis_engine.reports.table_config import TableConfig, TableConfigStep
 from nvh_api_schemas.catalog import ParameterCatalogRowOut
 from nvh_api_schemas.report import MasterSignatureStatsOut
@@ -165,3 +166,68 @@ def update_limit_config_threshold(
     row.updated_at = updated_at
     session.commit()
     return row
+
+
+def update_limit_config_limit(
+    session: Session,
+    model_id: str,
+    program_name: str,
+    gear_label: str,
+    direction: str,
+    channel_name: str,
+    stat_name: str,
+    limit_low: float,
+    limit_high: float,
+    updated_at: str,
+) -> LimitConfigRow | None:
+    """Operator-override side of Limit Config.vi -- updates just the LIMIT
+    band, leaving THRESHOLD_LOW/HIGH and everything else alone. Symmetric
+    with update_limit_config_threshold(); returns None on unknown row so
+    the router raises its own 404."""
+    row = session.get(
+        LimitConfigRow,
+        (model_id, program_name, gear_label, direction, channel_name, stat_name),
+    )
+    if row is None:
+        return None
+    row.limit_low = limit_low
+    row.limit_high = limit_high
+    row.updated_at = updated_at
+    session.commit()
+    return row
+
+
+def set_table_config_parameter(
+    session: Session,
+    model_id: str,
+    program_name: str,
+    channel_name: str,
+    stat_name: str,
+    included: bool,
+    updated_at: str,
+) -> bool:
+    """Adds or removes a TableConfigParameterRow -- the Phase E "which
+    parameters go in the Table Config" toggle. Idempotent: turning an
+    already-included parameter on again (or an already-excluded one off)
+    is a no-op. Rejects stat names that aren't in the analysis engine's
+    PARAMETER_CATALOG so we can't insert a Table Config row for a
+    parameter that doesn't exist in the grading framework. Returns True
+    on success, False for an unknown stat_name."""
+    if stat_name not in PARAMETER_CATALOG:
+        return False
+
+    existing = session.get(TableConfigParameterRow, (model_id, program_name, channel_name, stat_name))
+    if included and existing is None:
+        session.add(
+            TableConfigParameterRow(
+                model_id=model_id,
+                program_name=program_name,
+                channel_name=channel_name,
+                stat_name=stat_name,
+                updated_at=updated_at,
+            )
+        )
+    elif not included and existing is not None:
+        session.delete(existing)
+    session.commit()
+    return True

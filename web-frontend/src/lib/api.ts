@@ -311,6 +311,38 @@ export const api = {
         channel_name: opts.channelName ?? "vib_a",
       },
     ),
+  patchLimit: (
+    modelId: string,
+    programName: string,
+    statName: string,
+    opts: { gearLabel: string; direction: string; channelName?: string },
+    body: { limit_low: number; limit_high: number },
+  ) =>
+    patchJson<ParameterRow>(
+      `/models/${seg(modelId)}/programs/${seg(programName)}/limit-configs/${seg(statName)}/limit`,
+      body,
+      {
+        gear_label: opts.gearLabel,
+        direction: opts.direction,
+        channel_name: opts.channelName ?? "vib_a",
+      },
+    ),
+  patchTableConfigParameter: (
+    modelId: string,
+    programName: string,
+    statName: string,
+    opts: { gearLabel: string; direction: string; channelName?: string },
+    body: { included: boolean },
+  ) =>
+    patchJson<ParameterRow>(
+      `/models/${seg(modelId)}/programs/${seg(programName)}/table-config/parameters/${seg(statName)}`,
+      body,
+      {
+        gear_label: opts.gearLabel,
+        direction: opts.direction,
+        channel_name: opts.channelName ?? "vib_a",
+      },
+    ),
 };
 
 // ---- realtime shapes (nvh_api_schemas.realtime) ----

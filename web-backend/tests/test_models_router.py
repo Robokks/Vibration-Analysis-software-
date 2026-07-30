@@ -110,3 +110,103 @@ def test_patch_threshold_rejects_missing_body_fields(client, seeded_db):
         json={"threshold_low": 0.05},  # missing threshold_high
     )
     assert response.status_code == 422
+
+
+# ---- PATCH LIMIT band ---------------------------------------------------
+
+
+def _patch_limit(client, summary, stat_name, limit_low, limit_high, **overrides):
+    params = {"gear_label": "R", "direction": "RU", "channel_name": "vib_a", **overrides}
+    return client.patch(
+        f"/models/{summary['model_id']}/programs/REVA/limit-configs/{stat_name}/limit",
+        params=params,
+        json={"limit_low": limit_low, "limit_high": limit_high},
+    )
+
+
+def test_patch_limit_updates_only_limit_columns(client, seeded_db):
+    _, summary = seeded_db
+    before = client.get(
+        f"/models/{summary['model_id']}/programs/REVA/parameters",
+        params={"gear_label": "R", "direction": "RU", "channel_name": "vib_a"},
+    ).json()
+    rms_before = next(r for r in before if r["stat_name"] == "RMS Avg")
+
+    response = _patch_limit(client, summary, "RMS Avg", 0.1, 2.0)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["limit_low"] == 0.1
+    assert body["limit_high"] == 2.0
+    # THRESHOLD band untouched, master untouched, in-table untouched.
+    assert body["threshold_low"] == rms_before["threshold_low"]
+    assert body["threshold_high"] == rms_before["threshold_high"]
+    assert body["master"] == rms_before["master"]
+    assert body["included_in_table_config"] == rms_before["included_in_table_config"]
+
+
+def test_patch_limit_unknown_stat_name_returns_404(client, seeded_db):
+    _, summary = seeded_db
+    response = _patch_limit(client, summary, "NoSuchParam", 0.0, 0.0)
+    assert response.status_code == 404
+
+
+def test_patch_limit_rejects_missing_body_fields(client, seeded_db):
+    _, summary = seeded_db
+    response = client.patch(
+        f"/models/{summary['model_id']}/programs/REVA/limit-configs/RMS%20Avg/limit",
+        params={"gear_label": "R", "direction": "RU"},
+        json={"limit_low": 0.05},  # missing limit_high
+    )
+    assert response.status_code == 422
+
+
+# ---- PATCH Table Config parameter inclusion ----------------------------
+
+
+def _patch_table_config(client, summary, stat_name, included, **overrides):
+    params = {"gear_label": "R", "direction": "RU", "channel_name": "vib_a", **overrides}
+    return client.patch(
+        f"/models/{summary['model_id']}/programs/REVA/table-config/parameters/{stat_name}",
+        params=params,
+        json={"included": included},
+    )
+
+
+def test_patch_table_config_toggle_removes_then_readds(client, seeded_db):
+    _, summary = seeded_db
+    # Pick a stat_name that seeded_db definitely put in the table -- RMS Avg
+    # is in the default catalog.
+    off = _patch_table_config(client, summary, "RMS Avg", False)
+    assert off.status_code == 200
+    assert off.json()["included_in_table_config"] is False
+
+    on = _patch_table_config(client, summary, "RMS Avg", True)
+    assert on.status_code == 200
+    assert on.json()["included_in_table_config"] is True
+
+
+def test_patch_table_config_is_idempotent(client, seeded_db):
+    _, summary = seeded_db
+    first = _patch_table_config(client, summary, "RMS Avg", True)
+    assert first.status_code == 200
+    assert first.json()["included_in_table_config"] is True
+    # Re-including an already-included row is a no-op, not an error.
+    second = _patch_table_config(client, summary, "RMS Avg", True)
+    assert second.status_code == 200
+    assert second.json()["included_in_table_config"] is True
+
+
+def test_patch_table_config_unknown_stat_name_returns_404(client, seeded_db):
+    _, summary = seeded_db
+    response = _patch_table_config(client, summary, "NoSuchParam", True)
+    assert response.status_code == 404
+
+
+def test_patch_table_config_rejects_missing_body_field(client, seeded_db):
+    _, summary = seeded_db
+    response = client.patch(
+        f"/models/{summary['model_id']}/programs/REVA/table-config/parameters/RMS%20Avg",
+        params={"gear_label": "R", "direction": "RU"},
+        json={},  # missing 'included'
+    )
+    assert response.status_code == 422

@@ -32,3 +32,25 @@ class LimitConfigThresholdUpdate(BaseModel):
 
     threshold_low: float
     threshold_high: float
+
+
+class LimitConfigLimitUpdate(BaseModel):
+    """Body for the PATCH /models/{...}/limit-configs/{stat_name}/limit
+    endpoint -- the operator override side of Limit Config.vi. The LIMIT
+    band is normally auto-imported from the master signature, but the real
+    system lets an operator overwrite it (e.g. to loosen a limit that's
+    tripping too often); this endpoint persists just LIMIT_LOW/HIGH,
+    leaving THRESHOLD_LOW/HIGH untouched."""
+
+    limit_low: float
+    limit_high: float
+
+
+class TableConfigParameterUpdate(BaseModel):
+    """Body for the PATCH /models/{...}/table-config/parameters/{stat_name}
+    endpoint -- toggles whether the parameter appears in the program's
+    Table Config (Phase E). `included=true` inserts a
+    TableConfigParameterRow if none exists; `included=false` deletes it.
+    Idempotent by design."""
+
+    included: bool

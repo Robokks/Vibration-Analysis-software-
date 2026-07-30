@@ -1,6 +1,10 @@
 from nvh_qt_app.screens.master_entry import (
     MasterEntryScreen,
-    _ThresholdEditor,
+    _InTableToggle,
+    _NumericEditor,
+    _COL_IN_TABLE,
+    _COL_LIMIT_LOW,
+    _COL_LIMIT_HIGH,
     _COL_THRESHOLD_LOW,
     _COL_THRESHOLD_HIGH,
 )
@@ -48,54 +52,93 @@ class MasterEntryScreenTests:
         assert screen._param_table.item(1, 1).text() == "12"
         assert "loaded" in screen._status.text()
 
-    def test_threshold_columns_show_editors_with_initial_values(self, qapp):
+    def test_all_four_numeric_columns_are_editable(self, qapp):
         fake = FakeApiClient({"fetch_model": _MODEL, "fetch_parameters": _PARAMETERS})
         screen = MasterEntryScreen(api_client=fake)
 
-        low_editor = screen._param_table.cellWidget(0, _COL_THRESHOLD_LOW)
-        high_editor = screen._param_table.cellWidget(0, _COL_THRESHOLD_HIGH)
-        assert isinstance(low_editor, _ThresholdEditor)
-        assert isinstance(high_editor, _ThresholdEditor)
-        assert low_editor.text() == "0.02"
-        assert high_editor.text() == "0.03"
+        for col in (_COL_LIMIT_LOW, _COL_LIMIT_HIGH, _COL_THRESHOLD_LOW, _COL_THRESHOLD_HIGH):
+            editor = screen._param_table.cellWidget(0, col)
+            assert isinstance(editor, _NumericEditor)
+        assert screen._param_table.cellWidget(0, _COL_LIMIT_LOW).text() == "0.74"
+        assert screen._param_table.cellWidget(0, _COL_THRESHOLD_LOW).text() == "0.02"
 
-    def test_editing_threshold_dispatches_patch_and_updates_local_state(self, qapp):
-        updated_row = {
-            **_PARAMETERS[0],
-            "threshold_low": 0.09, "threshold_high": 0.03,
-        }
-        fake = FakeApiClient({
-            "fetch_model": _MODEL, "fetch_parameters": _PARAMETERS,
-            "patch_threshold": updated_row,
-        })
+    def test_editing_threshold_dispatches_patch_threshold(self, qapp):
+        fake = FakeApiClient({"fetch_model": _MODEL, "fetch_parameters": _PARAMETERS})
         screen = MasterEntryScreen(api_client=fake)
 
-        low_editor = screen._param_table.cellWidget(0, _COL_THRESHOLD_LOW)
-        low_editor.setText("0.09")
-        low_editor.editingFinished.emit()
+        editor = screen._param_table.cellWidget(0, _COL_THRESHOLD_LOW)
+        editor.setText("0.09")
+        editor.editingFinished.emit()
 
         assert len(fake.patch_threshold_calls) == 1
+        assert fake.patch_limit_calls == []
         call = fake.patch_threshold_calls[0]
         assert call["stat_name"] == "RMS Avg"
         assert call["threshold_low"] == 0.09
-        # The other threshold gets carried through from the cached row
-        # so the PATCH body is complete (endpoint requires both fields).
-        assert call["threshold_high"] == 0.03
+        assert call["threshold_high"] == 0.03  # carried through from cached row
         assert screen._rows_by_stat["RMS Avg"]["threshold_low"] == 0.09
-        assert "saved" in screen._status.text()
 
-    def test_editing_threshold_restores_previous_value_on_backend_failure(self, qapp):
+    def test_editing_limit_dispatches_patch_limit(self, qapp):
+        fake = FakeApiClient({"fetch_model": _MODEL, "fetch_parameters": _PARAMETERS})
+        screen = MasterEntryScreen(api_client=fake)
+
+        editor = screen._param_table.cellWidget(0, _COL_LIMIT_HIGH)
+        editor.setText("0.95")
+        editor.editingFinished.emit()
+
+        assert len(fake.patch_limit_calls) == 1
+        assert fake.patch_threshold_calls == []
+        call = fake.patch_limit_calls[0]
+        assert call["stat_name"] == "RMS Avg"
+        assert call["limit_high"] == 0.95
+        assert call["limit_low"] == 0.74  # carried through from cached row
+        assert screen._rows_by_stat["RMS Avg"]["limit_high"] == 0.95
+
+    def test_editing_numeric_reverts_on_backend_failure(self, qapp):
         fake = FakeApiClient(
             {"fetch_model": _MODEL, "fetch_parameters": _PARAMETERS},
-            fail=frozenset({"patch_threshold"}),
+            fail=frozenset({"patch_limit"}),
         )
         screen = MasterEntryScreen(api_client=fake)
 
-        low_editor = screen._param_table.cellWidget(0, _COL_THRESHOLD_LOW)
-        low_editor.setText("0.09")
-        low_editor.editingFinished.emit()
+        editor = screen._param_table.cellWidget(0, _COL_LIMIT_HIGH)
+        editor.setText("0.95")
+        editor.editingFinished.emit()
 
-        assert low_editor.text() == "0.02"  # reverted to the pre-edit stored value
+        assert editor.text() == "0.81"  # reverted to the pre-edit stored value
+        assert "save failed" in screen._status.text()
+
+    def test_in_table_toggle_dispatches_patch(self, qapp):
+        fake = FakeApiClient({"fetch_model": _MODEL, "fetch_parameters": _PARAMETERS})
+        screen = MasterEntryScreen(api_client=fake)
+
+        button = screen._param_table.cellWidget(0, _COL_IN_TABLE)
+        assert isinstance(button, _InTableToggle)
+        assert button.text() == "yes"
+
+        # Simulate a real user click: toggle checked state, then fire clicked.
+        button.setChecked(False)
+        button.clicked.emit()
+
+        assert len(fake.patch_table_config_calls) == 1
+        call = fake.patch_table_config_calls[0]
+        assert call["stat_name"] == "RMS Avg"
+        assert call["included"] is False
+        assert screen._rows_by_stat["RMS Avg"]["included_in_table_config"] is False
+        assert button.text() == "no"
+
+    def test_in_table_toggle_reverts_on_backend_failure(self, qapp):
+        fake = FakeApiClient(
+            {"fetch_model": _MODEL, "fetch_parameters": _PARAMETERS},
+            fail=frozenset({"patch_table_config_parameter"}),
+        )
+        screen = MasterEntryScreen(api_client=fake)
+
+        button = screen._param_table.cellWidget(0, _COL_IN_TABLE)
+        button.setChecked(False)
+        button.clicked.emit()
+
+        assert button.text() == "yes"  # reverted from the failed toggle
         assert "save failed" in screen._status.text()
 
     def test_shows_error_status_on_backend_failure(self, qapp):

@@ -775,6 +775,82 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — "what is pending" / "do all"
+
+**User:** "what is pending" — a status query, not a task.
+
+**Assistant:** listed remaining actionable work (more write endpoints;
+selectors, dependent on more seed data; AI layer and LabVIEW integration
+as future scope), and recommended more write endpoints as the natural
+next slice.
+
+**User:** "do all" — approval to continue autonomously.
+
+**Assistant:** picked two more write endpoints matching real-system
+workflows -- LIMIT band editing (real Limit Config.vi's operator
+override -- LIMIT normally auto-imports from the master but can be
+overridden manually) and Table Config parameter inclusion toggle
+(Phase E's per-parameter checkbox). Skipped selectors after confirming
+the seed dataset only produces a single MODEL-A/REVA/R/RU combination,
+so they'd navigate to empty results without expanded seed data first.
+
+Built it as one extension of the threshold pattern rather than three
+separate slices:
+
+- **`nvh_api_schemas.catalog`**: two new pydantic bodies
+  (`LimitConfigLimitUpdate` mirroring the threshold one,
+  `TableConfigParameterUpdate` = `{included: bool}`). Deliberately no
+  `REPORT_SCHEMA_VERSION` bump -- same boundary-scope reasoning as
+  before.
+- **`nvh_web_backend`**:
+  - `catalog_service.update_limit_config_limit()` symmetric with
+    `update_limit_config_threshold()`; leaves THRESHOLD untouched.
+  - `catalog_service.set_table_config_parameter()` -- idempotently
+    inserts/deletes a `TableConfigParameterRow`, rejects any stat name
+    that isn't in the analysis engine's `PARAMETER_CATALOG` (caught a
+    real API misconception during implementation: I first wrote
+    `entry.stat_name for entry in PARAMETER_CATALOG` before realizing
+    `PARAMETER_CATALOG` is a `dict[str, ParameterSpec]` -- fixed to
+    just `stat_name in PARAMETER_CATALOG`).
+  - Two new PATCH routes with shared `_missing_limit_config_detail` +
+    `_refreshed_row` helpers pulled out so all three edit endpoints
+    keep the same "return the refreshed ParameterCatalogRowOut" shape.
+    Also caught the `TableConfigParameterRow` PK during implementation
+    (it's `(model_id, program_name, channel_name, stat_name)` -- no
+    gear/direction, since Table Config is program-scoped) and fixed
+    an `updated_at` vs `created_at` mismatch against the real column
+    name.
+- **`web-frontend`**: `ThresholdCell` generalized into `NumericCell`
+  that dispatches by field name (`limit_low`/`limit_high` -> patchLimit,
+  `threshold_low`/`threshold_high` -> patchThreshold) so the same
+  component now handles four columns. `InTableCell` renders a
+  token-driven pass-green / muted `<button>` that toggles Table Config
+  membership; hover state uses the same accent tokens the graticule
+  UI already uses.
+- **`qt-app`**: `_ThresholdEditor` renamed to `_NumericEditor` with a
+  generic `value_committed(stat_name, field, value)` signal, all four
+  columns get one. New `_InTableToggle(QToolButton)` (checkable, styled
+  via `load_tokens()`'s dark palette for pass/muted colors); had to
+  double-check the token path (it's `color.palettes.dark.pass`, not
+  `colors.dark.pass` -- fixed after an initial `KeyError: 'colors'` in
+  the smoke test). `ApiClient` gets two new methods reusing the same
+  `sendCustomRequest("PATCH", ...)` machinery.
+- **`FakeApiClient`**: `patch_limit_calls` + `patch_table_config_calls`
+  logs and configurable responses so widget tests can verify the
+  dispatch shape without a live server.
+
+Caught one Qt-side test bug: `QToolButton.clicked` is a 0-arg signal
+(the `toggled(bool)` variant is the one that carries the checked flag),
+so `button.clicked.emit(False)` raised `TypeError`; fixed to
+`emit()` and rely on `setChecked(False)` beforehand to model a real
+user click.
+
+Full cross-package suite: **206/206 passing** (was 196; +7 backend +3
+net-new qt-app tests). Web-frontend typechecks and builds cleanly.
+Updated `PROGRESS.md`, wrote this transcript entry, and pushed as one
+commit -- same "extend the pattern, one edit surface at a time" cadence
+the earlier threshold slice used.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)

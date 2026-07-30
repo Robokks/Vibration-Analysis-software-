@@ -104,10 +104,11 @@ export function MasterEntry() {
   );
 }
 
-// Threshold columns are inline-editable -- mirrors the real system's Limit
-// Config.vi screen where the operator types the tuned margin and hits Save.
-// On blur we PATCH the backend and swap in the returned row so the visual
-// state matches DB state (server may round or clip the value).
+// LIMIT and THRESHOLD columns are inline-editable, and the "In table"
+// column is a clickable toggle -- mirrors the real system's Limit Config.vi
+// (LIMIT override + THRESHOLD margin tuning) plus the Table Config screen's
+// per-parameter inclusion checkbox. On every commit we PATCH the backend
+// and swap in the returned row so the visual state matches DB state.
 function ParameterTable({ initialRows }: { initialRows: ParameterRow[] }) {
   const [rows, setRows] = useState(initialRows);
   useEffect(() => {
@@ -128,7 +129,8 @@ function ParameterTable({ initialRows }: { initialRows: ParameterRow[] }) {
           <th className="border-b border-graticule pb-2 pr-4">Band</th>
           <th className="border-b border-graticule pb-2 pr-4">Full scale</th>
           <th className="border-b border-graticule pb-2 pr-4">Trials</th>
-          <th className="border-b border-graticule pb-2 pr-4">Limit lo/hi</th>
+          <th className="border-b border-graticule pb-2 pr-4">Limit lo</th>
+          <th className="border-b border-graticule pb-2 pr-4">Limit hi</th>
           <th className="border-b border-graticule pb-2 pr-4">Threshold lo</th>
           <th className="border-b border-graticule pb-2 pr-4">Threshold hi</th>
           <th className="border-b border-graticule pb-2">In table</th>
@@ -143,7 +145,9 @@ function ParameterTable({ initialRows }: { initialRows: ParameterRow[] }) {
   );
 }
 
+type LimitField = "limit_low" | "limit_high";
 type ThresholdField = "threshold_low" | "threshold_high";
+type NumericField = LimitField | ThresholdField;
 
 function ParameterRowView({
   row,
@@ -172,27 +176,22 @@ function ParameterRowView({
       <td className="border-b border-graticule/40 py-2 pr-4">
         {row.master ? row.master.trial_count : "—"}
       </td>
-      <td className="border-b border-graticule/40 py-2 pr-4">
-        {row.limit_low !== null && row.limit_high !== null
-          ? `${row.limit_low.toPrecision(3)} / ${row.limit_high.toPrecision(3)}`
-          : "—"}
-      </td>
-      <ThresholdCell row={row} field="threshold_low" onUpdated={onUpdated} />
-      <ThresholdCell row={row} field="threshold_high" onUpdated={onUpdated} />
-      <td className="border-b border-graticule/40 py-2 text-dark-secondaryText">
-        {row.included_in_table_config ? "yes" : "no"}
-      </td>
+      <NumericCell row={row} field="limit_low" onUpdated={onUpdated} />
+      <NumericCell row={row} field="limit_high" onUpdated={onUpdated} />
+      <NumericCell row={row} field="threshold_low" onUpdated={onUpdated} />
+      <NumericCell row={row} field="threshold_high" onUpdated={onUpdated} />
+      <InTableCell row={row} onUpdated={onUpdated} />
     </tr>
   );
 }
 
-function ThresholdCell({
+function NumericCell({
   row,
   field,
   onUpdated,
 }: {
   row: ParameterRow;
-  field: ThresholdField;
+  field: NumericField;
   onUpdated: (row: ParameterRow) => void;
 }) {
   const stored = row[field];
@@ -221,17 +220,19 @@ function ThresholdCell({
     setError(null);
     setSaving(true);
     try {
-      const body = {
-        threshold_low: field === "threshold_low" ? parsed : (row.threshold_low ?? 0),
-        threshold_high: field === "threshold_high" ? parsed : (row.threshold_high ?? 0),
-      };
-      const updated = await api.patchThreshold(
-        MODEL_ID,
-        PROGRAM_NAME,
-        row.stat_name,
-        { gearLabel: GEAR_LABEL, direction: DIRECTION, channelName: CHANNEL_NAME },
-        body,
-      );
+      const opts = { gearLabel: GEAR_LABEL, direction: DIRECTION, channelName: CHANNEL_NAME };
+      let updated: ParameterRow;
+      if (field === "limit_low" || field === "limit_high") {
+        updated = await api.patchLimit(MODEL_ID, PROGRAM_NAME, row.stat_name, opts, {
+          limit_low: field === "limit_low" ? parsed : (row.limit_low ?? 0),
+          limit_high: field === "limit_high" ? parsed : (row.limit_high ?? 0),
+        });
+      } else {
+        updated = await api.patchThreshold(MODEL_ID, PROGRAM_NAME, row.stat_name, opts, {
+          threshold_low: field === "threshold_low" ? parsed : (row.threshold_low ?? 0),
+          threshold_high: field === "threshold_high" ? parsed : (row.threshold_high ?? 0),
+        });
+      }
       onUpdated(updated);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "save failed";
@@ -268,6 +269,58 @@ function ThresholdCell({
         }}
         title={error ?? undefined}
       />
+    </td>
+  );
+}
+
+function InTableCell({
+  row,
+  onUpdated,
+}: {
+  row: ParameterRow;
+  onUpdated: (row: ParameterRow) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const included = row.included_in_table_config;
+
+  const toggle = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      const updated = await api.patchTableConfigParameter(
+        MODEL_ID,
+        PROGRAM_NAME,
+        row.stat_name,
+        { gearLabel: GEAR_LABEL, direction: DIRECTION, channelName: CHANNEL_NAME },
+        { included: !included },
+      );
+      onUpdated(updated);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <td className="border-b border-graticule/40 py-2">
+      <button
+        type="button"
+        onClick={() => void toggle()}
+        disabled={saving}
+        title={error ?? (included ? "Click to exclude" : "Click to include")}
+        className={[
+          "rounded px-3 py-1 text-xs font-medium transition-colors",
+          included
+            ? "bg-dark-pass/20 text-dark-pass hover:bg-dark-pass/30"
+            : "bg-dark-background text-dark-secondaryText hover:bg-dark-background/60",
+          error ? "ring-1 ring-dark-alarm" : "",
+          saving ? "opacity-60" : "",
+        ].join(" ")}
+      >
+        {included ? "yes" : "no"}
+      </button>
     </td>
   );
 }

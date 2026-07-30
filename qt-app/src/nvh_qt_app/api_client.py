@@ -165,3 +165,44 @@ class ApiClient:
         params = {"gear_label": gear_label, "direction": direction, "channel_name": channel_name}
         body = {"threshold_low": threshold_low, "threshold_high": threshold_high}
         self._patch(path, body, on_success, on_error, params)
+
+    def patch_limit(
+        self,
+        model_id: str,
+        program_name: str,
+        stat_name: str,
+        gear_label: str,
+        direction: str,
+        limit_low: float,
+        limit_high: float,
+        on_success: OnSuccess,
+        on_error: OnError,
+        channel_name: str = "vib_a",
+    ) -> None:
+        path = (
+            f"/models/{quote(model_id)}/programs/{quote(program_name)}"
+            f"/limit-configs/{quote(stat_name)}/limit"
+        )
+        params = {"gear_label": gear_label, "direction": direction, "channel_name": channel_name}
+        body = {"limit_low": limit_low, "limit_high": limit_high}
+        self._patch(path, body, on_success, on_error, params)
+
+    def patch_table_config_parameter(
+        self,
+        model_id: str,
+        program_name: str,
+        stat_name: str,
+        gear_label: str,
+        direction: str,
+        included: bool,
+        on_success: OnSuccess,
+        on_error: OnError,
+        channel_name: str = "vib_a",
+    ) -> None:
+        path = (
+            f"/models/{quote(model_id)}/programs/{quote(program_name)}"
+            f"/table-config/parameters/{quote(stat_name)}"
+        )
+        params = {"gear_label": gear_label, "direction": direction, "channel_name": channel_name}
+        body = {"included": included}
+        self._patch(path, body, on_success, on_error, params)
