@@ -79,6 +79,27 @@ scripts/install_local.sh          # Linux / macOS
 scripts\install_local.bat         # Windows
 ```
 
+### PyCharm interpreter (Windows gotcha)
+
+PyCharm sees a `pyproject.toml` in every subfolder (`qt-app/`,
+`web-backend/`, `analysis-engine/`, …) and, if you let it, will offer
+to create a *per-subfolder venv* like `qt-app\.venv\`. Those sub-venvs
+do NOT contain the seven editable packages, so `Run 'app.py'` on a file
+under `qt-app/src/nvh_qt_app/` will crash with:
+
+```
+ModuleNotFoundError: No module named 'nvh_design_tokens'
+```
+
+Point PyCharm at the ONE root venv instead:
+
+1. **File → Settings → Project: Vibration-Analysis-software- → Python Interpreter**
+2. Gear icon → **Add Interpreter → Add Local Interpreter… → Existing**
+3. Browse to
+   `...\Vibration-Analysis-software-\.venv\Scripts\python.exe`
+   (the root `.venv`, not `qt-app\.venv` or `web-backend\.venv`)
+4. OK. Any stray per-subfolder `.venv\` directories can then be deleted.
+
 > **Activate the venv first.** The commands below assume your venv is
 > active — the prompt shows `(.venv)` or `(venv)`. Activate with
 > `. .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\activate`
