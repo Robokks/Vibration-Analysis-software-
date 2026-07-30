@@ -775,6 +775,74 @@ typechecks and builds cleanly (259 kB bundle, no size regression worth
 mentioning). Then updated `PROGRESS.md`, wrote this transcript entry,
 and pushed.
 
+### Turn — "gui not looking good, ring are not looking good" + "configurable"
+
+**User:** "gui not looking good / ring are not looking good".
+
+**Assistant:** asked via AskUserQuestion whether "ring" meant
+spinbox arrows, gear-glyph, combo drop-arrow, or in-table toggle.
+**User selected "Spinbox up/down arrows"** and then sent a
+screenshot circling the ZOOM SETTINGS group on the FFT tab where
+Start Frequency / Stop Frequency / % Overlap / Number of Lines
+had blank right sides (no arrows visible).
+
+Root cause: my theme QSS didn't have entries for QDoubleSpinBox /
+QSpinBox / QComboBox / QCheckBox / QGroupBox at all -- Qt was
+falling back to platform defaults which the offscreen renderer
+was drawing invisibly against the dark background.
+
+Added comprehensive QSS entries for the form controls; tried
+several approaches for the arrows themselves:
+
+1. First tried CSS border-triangle (border-left/right transparent,
+   border-bottom coloured, width:0 height:0) -- Qt drew tiny
+   marks but not proper triangles.
+2. Then tried inline SVG data URIs in `image:` -- reliable in
+   some Qt versions, but the offscreen renderer + our specific
+   QtSvg plugin loadout didn't render them.
+3. **Settled on: generating real SVG files on disk** with the
+   palette color baked in, referenced via absolute file paths.
+   New `_write_arrow_svgs(color_hex)` in `theme.py` writes
+   `arrow_up_<slug>.svg` + `arrow_down_<slug>.svg` under
+   `nvh_qt_app/assets/` on every `build_stylesheet()` call, so
+   the palette flip regenerates them with the new color.
+   Referenced via `.as_posix()` -- Qt QSS's `url("/abs/path.svg")`
+   works consistently even when `file://` prefix doesn't.
+
+Also polished the surrounding chrome:
+
+- QGroupBox now has themed border + accent-primary orange section
+  title with proper padding/margin -- matches SectionTitle.
+- QLineEdit / QDoubleSpinBox / QSpinBox / QComboBox all get
+  background/graticule border/accent-secondary focus outline +
+  accent-secondary text selection.
+- QComboBox drop-down + spinbox up/down buttons get panel-color
+  plates with graticule left-border separator; background
+  color on hover.
+- Combo popup (QAbstractItemView) gets themed background +
+  accent-secondary selection.
+- QCheckBox indicator: 14x14 rounded square, accent-secondary
+  when checked.
+- QDialogButtonBox buttons: Cancel outlined, Save (default)
+  accent-secondary filled.
+- Calibration screen Save button styled the same way via
+  `#CalibrationSave` object name selector.
+- Widened FreqDomainSettingsDialog from 520x640 to 760x720 so
+  all 7 tab labels ("FFT / Order Spectrum / Order Tracking /
+  Waterfall / Cascade / Colormap / Octave") fit without
+  ellipsis truncation.
+
+Generated arrow SVGs added to `.gitignore` -- they're
+palette-derived and rewritten on every stylesheet build, so no
+versioning benefit.
+
+Screenshots verify: FFT tab now shows all spinbox + combo arrows
+cyan; Order Tracking tab shows every numeric field with proper
+up/down arrows; Calibration screen shows arrows on Sensor
+sensitivity / dB reference / Pregain, and combo dropdowns on
+Engineering units / Weighting filter. Full cross-package suite:
+**252/252 passing.**
+
 ### Turn — "frequency domain setting" (7 photos) + "configurable"
 
 **User** attached 7 phone photos of the real LabVIEW PLOT SETUP

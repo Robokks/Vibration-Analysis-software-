@@ -370,14 +370,22 @@ class FreqDomainSettingsDialog(QDialog):
     def __init__(self, settings: FreqDomainSettings, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("PLOT SETUP")
-        self.setMinimumSize(520, 640)
+        # Wide enough so all 7 tab labels fit without ellipsis, tall
+        # enough to show the longest form (SpectrogramSettings) without
+        # scrolling on a typical operator display.
+        self.setMinimumSize(760, 720)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
         title = QLabel("PLOT SETUP")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Font styling comes from the theme's SectionTitle-ish rule
+        # applied via objectName so dark/light both look right.
+        title.setObjectName("DialogTitle")
         title.setStyleSheet(
-            "QLabel { font-family: 'Space Grotesk', sans-serif; font-size: 14px; "
-            "letter-spacing: 0.12em; }"
+            "QLabel#DialogTitle { font-family: 'Space Grotesk', sans-serif; "
+            "font-size: 15px; letter-spacing: 0.14em; font-weight: bold; }"
         )
         layout.addWidget(title)
 

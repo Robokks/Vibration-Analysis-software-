@@ -6,6 +6,49 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-30 20:45 UTC — Qt: GUI polish for the PLOT SETUP dialog + Calibration form
+
+User called out that "the rings" (spinbox up/down arrows) weren't
+showing up properly on the settings dialog + Calibration screen.
+Added comprehensive QSS entries for the form controls and generated
+palette-aware arrow SVGs on disk so Qt actually renders them.
+
+- New QSS entries in `theme.py` for QDoubleSpinBox / QSpinBox /
+  QComboBox / QLineEdit / QCheckBox / QGroupBox / QDialog /
+  QDialogButtonBox: themed borders, focus outlines in accent
+  secondary, panel background for the button plates, groupbox
+  title styling matching SectionTitle (accent primary orange).
+- Arrow rendering: attempted several approaches (border-triangle
+  CSS trick, inline SVG data URIs) that Qt QSS didn't reliably
+  render, especially under QT_QPA_PLATFORM=offscreen. Settled on
+  generating actual arrow_up_<slug>.svg / arrow_down_<slug>.svg
+  files under `nvh_qt_app/assets/` with the palette color baked in,
+  and referencing them via absolute file paths in QSS `image:` --
+  works in both offscreen + real-platform runs. New
+  `_write_arrow_svgs(color_hex)` helper in `theme.py` regenerates
+  the SVGs on every `build_stylesheet()` call so the palette flip
+  swaps the arrow color too.
+- Combo drop-down arrow: same SVG as the spinbox down arrow.
+  Combo popup list QAbstractItemView gets themed background +
+  accent-secondary selection color.
+- Dialog Save button styled as default (accent-secondary filled),
+  Cancel outlined. Calibration screen's Save button similarly
+  accent-secondary via its object name.
+- Widened FreqDomainSettingsDialog from 520x640 to 760x720 so all
+  7 tab labels fit without ellipsis truncation.
+- Generated arrow SVGs added to `.gitignore` -- they're derived
+  from the palette and get overwritten on every stylesheet build,
+  no versioning benefit.
+
+Screenshots confirm the fix on both the FFT / Order Tracking
+tabs (all spinbox arrows now render cyan; combo dropdowns styled)
+and the Calibration screen (Sensor sensitivity / dB reference /
+Pregain all show up/down arrows; Engineering units + Weighting
+filter combos have proper dropdown indicators). Full cross-package
+suite: **252/252 passing.**
+
+---
+
 ## 2026-07-30 20:00 UTC — Qt: PLOT SETUP dialog with 7 tabs + configurable freq-domain plots
 
 User shared 7 LabVIEW reference photos of the Frequency Series' PLOT
