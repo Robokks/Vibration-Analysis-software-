@@ -1,19 +1,16 @@
-# Flat pip-installable dependency list for the whole NVH stack.
-# Each pyproject.toml declares its own deps for a real package build;
-# this file exists so a developer can bootstrap the full workspace
-# with just `pip install -r requirements.txt` without having to know
-# the install order for the seven local packages.
+# Third-party dependencies for the whole NVH stack.
+# Local packages install as a separate step -- see the follow-up
+# `pip install -e ...` in the README (or run scripts/install_local.sh
+# / .bat which does it for you). Splitting them keeps this file
+# portable: some pip versions on Windows reject `-e ./path` inside a
+# requirements file, so we don't put editable installs here.
 #
 # Usage from the repo root:
 #   python -m venv .venv
-#   . .venv/bin/activate
+#   . .venv/bin/activate       # Windows: .venv\Scripts\activate
 #   pip install -r requirements.txt
-#   pip install -r requirements-dev.txt   # optional -- for pytest
-#
-# --------------------------------------------------------------------
-# Third-party runtime deps (pinned to lower bounds only; pyproject
-# files carry the same versions -- keep the two in sync when bumping).
-# --------------------------------------------------------------------
+#   pip install -e design-tokens -e libs/nvh_contract -e libs/nvh_api_schemas \
+#               -e analysis-engine -e simulator -e web-backend -e qt-app
 
 # Contracts + validation
 pydantic>=2.6
@@ -32,16 +29,3 @@ pyzmq>=25
 
 # Desktop GUI
 PySide6>=6.8
-
-# --------------------------------------------------------------------
-# Local packages (editable installs so tests can import + edits are
-# live). Order matters: leaf packages first, then their consumers.
-# --------------------------------------------------------------------
-
--e ./design-tokens
--e ./libs/nvh_contract
--e ./libs/nvh_api_schemas
--e ./analysis-engine
--e ./simulator
--e ./web-backend
--e ./qt-app
