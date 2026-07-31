@@ -179,6 +179,40 @@ Then, in another terminal: `cd web-frontend && npm run dev` (Vite dev
 server, `http://localhost:5173`), or `nvh-qt-app` (desktop). Both
 clients' Master Entry and Reports screens will show the seeded demo data.
 
+## NI-DAQmx source (real or NI MAX simulated device)
+
+`live_simulator.py` is fine for offline demos, but if you have NI-DAQmx
+installed — including the NI MAX "simulated device" workflow that ships
+with the driver — you can swap it for `live_daq.py` without touching
+anything downstream. Both publish the same three ZMQ schemas
+(`LiveTestRunUpdate`, `LiveSignalChunk`, `LiveDcUpdate`) on the same
+PUB URL, so the FastAPI relay and both GUI clients don't know or care
+which one is running.
+
+Setup:
+
+1. Install the NI-DAQmx driver from ni.com. Open **NI MAX → Devices and
+   Interfaces**, right-click → **Create New… → Simulated NI-DAQmx Device
+   or Modular Instrument**. Pick an analog-input device (an NI 9234 is
+   a good default — 4-channel dynamic-signal-acquisition), give it a
+   name like `Dev1`, and save.
+2. Install the Python bindings into the repo-root venv:
+
+   ```bash
+   pip install -r requirements-daq.txt
+   ```
+
+3. Start acquisition:
+
+   ```bash
+   python web-backend/scripts/live_daq.py --device Dev1 --channel ai0
+   ```
+
+   `nvh-launcher` also has a dedicated **NI-DAQmx Producer** row that
+   runs the same command — just click Start on that row instead of the
+   synthetic one. Only one producer can hold `tcp://*:5555` at a time,
+   so stop whichever you're not using.
+
 ## Run the tests
 
 ```bash

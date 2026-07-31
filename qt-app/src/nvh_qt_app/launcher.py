@@ -43,6 +43,8 @@ from .widgets.gear_glyph import colored_svg_bytes
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB_URL = "sqlite:///./data/nvh_demo/nvh_demo.db"
 WEB_UI_URL = "http://localhost:5173"
+DEFAULT_DAQ_DEVICE = "Dev1"
+DEFAULT_DAQ_CHANNEL = "ai0"
 
 _STATUS_IDLE = "idle"
 _STATUS_STARTING = "starting"
@@ -68,10 +70,24 @@ def _build_service_specs() -> list[ServiceSpec]:
     return [
         ServiceSpec(
             key="sim",
-            name="Live Simulator",
-            description="ZeroMQ PUB — synthetic gearbox signal on tcp://*:5556",
+            name="Live Simulator (synthetic)",
+            description="ZeroMQ PUB — synthetic gearbox signal on tcp://*:5555",
             program=sys.executable,
             args=[str(REPO_ROOT / "web-backend/scripts/live_simulator.py")],
+        ),
+        ServiceSpec(
+            key="daq",
+            name="NI-DAQmx Producer",
+            description=(
+                f"ZeroMQ PUB — NI-DAQmx {DEFAULT_DAQ_DEVICE}/{DEFAULT_DAQ_CHANNEL} "
+                "(real hardware or a NI MAX simulated device)"
+            ),
+            program=sys.executable,
+            args=[
+                str(REPO_ROOT / "web-backend/scripts/live_daq.py"),
+                "--device", DEFAULT_DAQ_DEVICE,
+                "--channel", DEFAULT_DAQ_CHANNEL,
+            ],
         ),
         ServiceSpec(
             key="backend",
@@ -358,7 +374,7 @@ class LauncherWindow(QMainWindow):
         self._theme = theme
 
         self.setWindowTitle("NVH Launcher")
-        self.setMinimumSize(880, 760)
+        self.setMinimumSize(920, 900)
         self.setWindowIcon(_window_icon())
 
         central = QWidget()

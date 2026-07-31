@@ -12,13 +12,24 @@ from nvh_design_tokens import load_tokens
 
 
 class LauncherWindowTests:
-    def test_four_services_rendered(self, qapp):
+    def test_all_services_rendered(self, qapp):
         theme = ThemeManager(initial=PALETTE_DARK)
         window = LauncherWindow(theme)
 
-        assert len(window._rows) == 4
+        assert len(window._rows) == 5
         service_keys = [row.spec.key for row in window._rows]
-        assert service_keys == ["sim", "backend", "web", "qt"]
+        assert service_keys == ["sim", "daq", "backend", "web", "qt"]
+
+        window.close()
+
+    def test_daq_row_targets_live_daq_script(self, qapp):
+        theme = ThemeManager(initial=PALETTE_DARK)
+        window = LauncherWindow(theme)
+
+        daq_row = next(r for r in window._rows if r.spec.key == "daq")
+        assert daq_row.spec.args[0].endswith("live_daq.py")
+        assert "--device" in daq_row.spec.args
+        assert "--channel" in daq_row.spec.args
 
         window.close()
 
