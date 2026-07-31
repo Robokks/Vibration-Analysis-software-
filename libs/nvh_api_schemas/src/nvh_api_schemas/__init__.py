@@ -15,6 +15,7 @@ from nvh_api_schemas.realtime import (
     LiveTestRunUpdate,
     PlcStateUpdate,
 )
+from nvh_api_schemas.summary import SummaryDataCreate, SummaryDataOut
 from nvh_api_schemas.report import (
     CodeResultReportOut,
     CodeResultRowOut,
@@ -69,6 +70,8 @@ __all__ = [
     "OrderSpectrumOut",
     "OrderTrackingOut",
     "SlippageOut",
+    "SummaryDataCreate",
+    "SummaryDataOut",
     "SummaryReportOut",
     "SummaryRowOut",
     "XChartOut",

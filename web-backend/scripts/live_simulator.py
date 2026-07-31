@@ -31,6 +31,9 @@ import numpy as np
 import zmq
 
 from analysis_engine.ordermatrix.gear_math import GearTeeth, compute_gear_orders
+import json as _json
+import urllib.request as _urlreq
+
 from nvh_api_schemas.realtime import (
     LiveDcUpdate,
     LiveSignalChunk,
@@ -223,6 +226,24 @@ def _open_rollover_writer(base_dir: str | None, trial_no: int, gear_id: int, nvh
     return writer
 
 
+def _post_summary(backend_url: str, body: dict) -> None:
+    """Fire-and-forget POST to /summaries. Best-effort -- a summary
+    persistence failure must not kill the producer (the live stream is
+    the real deliverable). Prints one line on error and moves on."""
+    try:
+        payload = _json.dumps(body).encode("utf-8")
+        req = _urlreq.Request(
+            f"{backend_url.rstrip('/')}/summaries",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _urlreq.urlopen(req, timeout=1.5) as resp:
+            resp.read()
+    except Exception as exc:
+        print(f"live_simulator: summary POST failed: {exc}", file=sys.stderr, flush=True)
+
+
 def _run_plc_driven_mode(
     socket: zmq.Socket,
     plc_url: str,
@@ -234,6 +255,7 @@ def _run_plc_driven_mode(
     model_id: str = MODEL_ID,
     serial_no: str = "SN-DEMO",
     serial_rpt: int = 1,
+    backend_url: str | None = None,
 ) -> None:
     ctx = zmq.Context.instance()
     plc_sub = ctx.socket(zmq.SUB)
@@ -304,6 +326,18 @@ def _run_plc_driven_mode(
                             fail_reason_codes=[],
                         ))
                         print(f"live_simulator: FINAL_LOG_REQUESTED dc_id={active_dc_id[:8]}", flush=True)
+                        if backend_url:
+                            _post_summary(backend_url, {
+                                "test_run_id": active_test_run_id or active_dc_id,
+                                "dc_id": active_dc_id,
+                                "model_id": model_id,
+                                "serial_no": serial_no,
+                                "serial_rpt": serial_rpt,
+                                "gear_id": sm.gear_id,
+                                "nvh_id": sm.nvh_id,
+                                "stamp": "PASS",
+                                "fail_reason_codes": [],
+                            })
                 elif t == Transition.RUN_STOPPED:
                     if active_test_run_id:
                         _send(socket, LiveTestRunUpdate(
@@ -395,6 +429,11 @@ def main() -> None:
     parser.add_argument("--serial-rpt", type=int,
                         default=int(os.environ.get("NVH_SERIAL_RPT", "1")),
                         help="Serial repeat counter used in the raw-dir path (default 1).")
+    parser.add_argument("--backend-url",
+                        default=os.environ.get("NVH_BACKEND_URL", ""),
+                        help="If set, POST a summary row here on every "
+                             "FINAL_LOG_REQUESTED transition (Phase J). "
+                             "E.g. http://localhost:8000")
     args = parser.parse_args()
 
     context = zmq.Context.instance()
@@ -414,6 +453,7 @@ def main() -> None:
                 model_id=args.model_id,
                 serial_no=args.serial_no,
                 serial_rpt=args.serial_rpt,
+                backend_url=args.backend_url or None,
             )
         else:
             _run_auto_mode(socket, tdms_writer)

@@ -167,6 +167,37 @@ class TableConfigParameterRow(Base):
     updated_at = Column(String, nullable=False)
 
 
+class SummaryDataRow(Base):
+    """One row per final-log-triggered summary snapshot. Written when the
+    PLC's `final_log_trigger` transitions high while log_active. This is
+    the persistent counterpart to the reconstruction pipeline in
+    `nvh_web_backend.report_service._reconstruct_result` -- reports UI
+    can list these directly without re-running the analysis every
+    request.
+
+    The columns are the flat headline stats operators watch on the
+    machine-side dashboard; deeper per-parameter numbers still come
+    from the reconstruction path.
+    """
+
+    __tablename__ = "summary_data"
+
+    summary_id = Column(String, primary_key=True)  # uuid4
+    test_run_id = Column(String, index=True)
+    dc_id = Column(String, index=True)
+    model_id = Column(String, ForeignKey("models.model_id"))
+    serial_no = Column(String)
+    serial_rpt = Column(Integer)
+    gear_id = Column(Integer, nullable=False)
+    nvh_id = Column(Integer, nullable=False)
+    rms_avg = Column(Float, nullable=True)
+    peak = Column(Float, nullable=True)
+    order_1x_mag = Column(Float, nullable=True)
+    stamp = Column(String, nullable=False, default="PASS")
+    fail_reason_codes_json = Column(String, nullable=False, default="[]")
+    created_at = Column(String, nullable=False)
+
+
 class CalibrationRow(Base):
     """One row per (model, channel) recording the sensor calibration
     state the operator entered on the Calibration screen -- matches the
