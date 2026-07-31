@@ -22,7 +22,7 @@ class SummaryDataCreate(BaseModel):
     dc_id: str
     model_id: str
     serial_no: str
-    serial_rpt: int
+    serial_rpt: str  # string to match IngestContextIn -- accepts "R2" etc.
     gear_id: int
     nvh_id: int
     rms_avg: float | None = None
@@ -41,7 +41,7 @@ class SummaryDataOut(BaseModel):
     dc_id: str
     model_id: str
     serial_no: str
-    serial_rpt: int
+    serial_rpt: str  # string to match IngestContextIn -- accepts "R2" etc.
     gear_id: int
     nvh_id: int
     rms_avg: float | None

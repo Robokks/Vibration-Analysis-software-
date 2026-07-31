@@ -192,7 +192,10 @@ class SummaryDataRow(Base):
     dc_id = Column(String, index=True)
     model_id = Column(String, ForeignKey("models.model_id"))
     serial_no = Column(String)
-    serial_rpt = Column(Integer)
+    # String, not Integer -- operator entry via the dashboard can carry
+    # non-numeric repeat suffixes (e.g. "R2"). Matches
+    # IngestContextRow.serial_rpt below.
+    serial_rpt = Column(String)
     gear_id = Column(Integer, nullable=False)
     nvh_id = Column(Integer, nullable=False)
     rms_avg = Column(Float, nullable=True)
