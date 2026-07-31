@@ -13,9 +13,14 @@ def test_gear_label_from_id_round_trips_with_gear_id_from_label():
         assert gear_id_from_label(label) == gear_id
 
 
-def test_gear_label_from_id_rejects_unknown_slot():
-    with pytest.raises(ValueError):
-        gear_label_from_id(7)
+def test_gear_label_from_id_returns_none_for_unknown_id():
+    # Phase O Bug 3b: symmetric with direction_from_nvh_id. The PLC
+    # hot-path (sm.gear_label @property) must not raise on a rogue
+    # gear_id like 7 or 99 -- return None so the emission guard can
+    # short-circuit cleanly.
+    assert gear_label_from_id(7) is None
+    assert gear_label_from_id(99) is None
+    assert gear_label_from_id(-1) is None
 
 
 def test_gear_id_from_label_rejects_unknown_label():

@@ -199,11 +199,24 @@ def _synth_chunk(gear_label: str, chunk_index: int, sample_rate_hz: float, rng) 
 
 def _open_rollover_writer(base_dir: str | None, trial_no: int, gear_id: int, nvh_id: int, model_id: str, serial_no: str, serial_rpt: int):
     """Open a per-(gear_id, nvh_id) TDMS file under `base_dir` using the
-    nested layout, or None if base_dir isn't configured OR the
-    (gear_id, nvh_id) says "don't log" (either sentinel < 0)."""
+    nested layout. Returns None (no file opened) when:
+    - base_dir isn't configured, OR
+    - `gear_label_from_id(gear_id)` is None (idle sentinel -1 OR any
+      unknown gear_id like 99), OR
+    - `direction_from_nvh_id(nvh_id)` is None (idle sentinel -1 OR any
+      unknown nvh_id like 5).
+
+    Phase O Bug 3d: previously this only rejected `< 0`, so a rogue
+    PLC packet with nvh_id=5 opened a real file with a junk filename
+    like `SN-XXX_1_5.tdms` -- and downstream analysis tools that
+    assume nvh_id in {0,1,2,3} crashed. Symmetric guarding on both
+    ids ensures rogue values never land on disk."""
+    from nvh_contract.gear_ids import gear_label_from_id
+    from nvh_contract.state import direction_from_nvh_id
+
     if not base_dir:
         return None
-    if gear_id < 0 or nvh_id < 0:
+    if gear_label_from_id(gear_id) is None or direction_from_nvh_id(nvh_id) is None:
         return None
     try:
         from nptdms import TdmsWriter  # noqa: WPS433

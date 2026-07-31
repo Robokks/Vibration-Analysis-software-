@@ -33,12 +33,15 @@ RUN_STOPPED after them.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
 from nvh_api_schemas.realtime import PlcStateUpdate
 
 from nvh_contract.gear_ids import gear_label_from_id
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class Transition(Enum):
@@ -60,14 +63,24 @@ NVH_ID_TO_DIRECTION: dict[int, str] = {
 
 
 def direction_from_nvh_id(nvh_id: int) -> str | None:
-    """None for -1 (no-log sentinel); raises for other unknown ids so
-    a bad PLC payload is loud rather than silently dropped."""
+    """None for the -1 sentinel AND for any unknown nvh_id.
+
+    Rationale (Phase O Bug 3): the state machine's `direction`
+    @property is read on every signal chunk. Raising here on a rogue
+    PLC packet (bit flip, wrong DB layout) crashed the producer with
+    an uncaught ValueError. A production PLC producer must not die on
+    transient bad data -- return None so callers can gate on
+    `if sm.direction is None`.
+
+    Rate limiting of the unknown-id warning is the consumer's job via
+    stdlib `logging` filters -- keeping a module-global "already
+    warned" set here breaks test isolation."""
     if nvh_id == -1:
         return None
-    try:
-        return NVH_ID_TO_DIRECTION[nvh_id]
-    except KeyError:
-        raise ValueError(f"unknown nvh_id {nvh_id!r}") from None
+    direction = NVH_ID_TO_DIRECTION.get(nvh_id)
+    if direction is None:
+        _LOGGER.warning("unknown nvh_id %r -- treating as no-log", nvh_id)
+    return direction
 
 
 @dataclass
@@ -83,16 +96,21 @@ class NvhStateMachine:
 
     @property
     def log_active(self) -> bool:
-        """The single-line rule: log iff the operator has pressed START
-        AND the PLC is currently reporting a valid nvh_id (not -1)."""
-        return self.nvh_cmd == "START" and self.nvh_id != -1
+        """Log iff the operator has pressed START AND the PLC is
+        currently reporting a valid (known) nvh_id.
+
+        Bug 3c: previously this only checked `nvh_id != -1`, so a
+        rogue value like 5 kept log_active True but sm.direction
+        would be None -- causing silent chunk drops with no
+        operator-visible signal. Now log_active is False when the
+        direction can't be resolved, ensuring the emission guard
+        and the "run active" UI stay consistent."""
+        return self.nvh_cmd == "START" and direction_from_nvh_id(self.nvh_id) is not None
 
     @property
     def gear_label(self) -> str | None:
-        """Human-facing gear label, or None if the PLC hasn't reported a
-        valid gear yet (gear_id == -1 during idle)."""
-        if self.gear_id == -1:
-            return None
+        """Human-facing gear label; None for the idle sentinel or
+        any unknown gear_id (see `gear_label_from_id`)."""
         return gear_label_from_id(self.gear_id)
 
     @property
@@ -122,11 +140,14 @@ class NvhStateMachine:
             self.trial_no += 1
             transitions.append(Transition.RUN_STARTED)
 
-        # GEAR / NVH_ID changes only matter while the log is (or was)
-        # active. If we transitioned into an active state via RUN_STARTED
-        # this cycle, still emit them so a fresh run's initial config
-        # lands cleanly.
-        if self.log_active or was_active or run_start:
+        # GEAR / NVH_ID changes only matter mid-run. On the RUN_STARTED
+        # tick, the gear/nvh values are baked into RUN_STARTED's
+        # semantics ("open a fresh writer at the current (gear_id,
+        # nvh_id)") -- also emitting GEAR_CHANGED / NVH_ID_CHANGED on
+        # the same tick caused the producer's rollover-writer handler
+        # to fire three times, opening + closing + reopening the same
+        # TDMS file (Phase O Bug 1).
+        if (self.log_active or was_active) and not run_start:
             if update.gear_id != prev_gear:
                 transitions.append(Transition.GEAR_CHANGED)
             if update.nvh_id != prev_nvh:

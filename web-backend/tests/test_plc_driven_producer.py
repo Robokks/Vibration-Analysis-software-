@@ -129,6 +129,14 @@ class TdmsRolloverTests:
         tdms = TdmsFile.read(str(tdms_files[0]))
         assert tdms["acquisition"]["vib_a"].data.size > 0
 
+        # Phase O Bug 1 correctness is pinned at the state-machine level
+        # in `libs/nvh_contract/tests/test_state.py::test_start_from_idle_emits_only_run_started`.
+        # A file-count assertion here would be either trivially true
+        # (all 3 buggy opens target the same path, so the file count
+        # under buggy code is still 1) or racy against the PLC
+        # simulator's looping sequence (creates additional Trial2 files
+        # within the 4s window).
+
 
 @pytest.mark.parametrize("no_plc_env", [{"NVH_PLC_PUB_URL": ""}])
 class AutoModeSmokeTests:
