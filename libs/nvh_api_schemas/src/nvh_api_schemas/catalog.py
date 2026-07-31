@@ -24,6 +24,22 @@ class ParameterCatalogRowOut(BaseModel):
     included_in_table_config: bool
 
 
+class ChannelConfigOut(BaseModel):
+    """One row per configured channel for a model, drives the
+    Phase L auto-layout of Live Display plots (one plot group per
+    channel). The `sensor_type` string is what the Qt client
+    switches on: 'accel' (time + freq + order plots), 'mic' (time +
+    freq octave), 'counter' (RPM readout only)."""
+
+    channel_name: str
+    sensor_type: str | None
+    units: str
+    sensitivity_mv_per_eu: float | None
+    pregain_db: float | None
+    weighting_filter: str | None
+    is_reference_accel: bool
+
+
 class LimitConfigThresholdUpdate(BaseModel):
     """Body for the PATCH /models/{...}/limit-configs/{stat_name}/threshold
     endpoint -- matches the real system's Limit Config.vi "Save" button

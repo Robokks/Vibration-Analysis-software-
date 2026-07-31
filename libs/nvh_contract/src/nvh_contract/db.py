@@ -78,6 +78,11 @@ class ChannelRow(Base):
     sensitivity_mv_per_eu = Column(Float)
     pregain_db = Column(Float, default=0.0)
     weighting_filter = Column(String, default="linear")
+    # Phase L: which channel drives the order-domain plots (order
+    # spectrum + order tracking use exactly one reference accel). Only
+    # one channel per DC should have this flag set; readers pick the
+    # first one they see if the DB is inconsistent.
+    is_reference_accel = Column(Boolean, default=False, nullable=False)
 
 
 class MasterSignatureRow(Base):

@@ -1,6 +1,7 @@
 from nvh_api_schemas.catalog import (
     CalibrationOut,
     CalibrationUpdate,
+    ChannelConfigOut,
     LimitConfigLimitUpdate,
     LimitConfigThresholdUpdate,
     ParameterCatalogRowOut,
@@ -81,6 +82,7 @@ __all__ = [
     "XChartOut",
     "CalibrationOut",
     "CalibrationUpdate",
+    "ChannelConfigOut",
     "LimitConfigLimitUpdate",
     "LimitConfigThresholdUpdate",
     "ParameterCatalogRowOut",
