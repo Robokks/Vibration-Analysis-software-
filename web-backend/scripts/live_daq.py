@@ -33,6 +33,7 @@ import os
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import numpy as np
 import zmq
@@ -59,9 +60,9 @@ def _send(socket: zmq.Socket, event) -> None:
 def _import_nidaqmx():
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType
+        from nidaqmx.constants import AcquisitionType, LoggingMode, LoggingOperation
 
-        return nidaqmx, AcquisitionType
+        return nidaqmx, AcquisitionType, LoggingMode, LoggingOperation
     except ImportError as exc:
         print(
             "live_daq: the `nidaqmx` package isn't installed.\n"
@@ -127,6 +128,13 @@ def _emit_run(
     print(f"live_daq: run {test_run_id[:8]}... completed", flush=True)
 
 
+def _resolve_tdms_path(raw: str) -> str:
+    """Substitute `{ts}` -> UTC timestamp so parallel launches don't
+    stomp on each other; passes any explicit path through unchanged."""
+    ts = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+    return raw.replace("{ts}", ts)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Publish NI-DAQmx samples over ZMQ (drop-in for live_simulator.py)")
     parser.add_argument("--device", default=os.environ.get("NVH_DAQ_DEVICE", "Dev1"),
@@ -136,6 +144,15 @@ def main() -> None:
     parser.add_argument("--sample-rate", type=float,
                         default=float(os.environ.get("NVH_DAQ_SAMPLE_RATE", "5000")),
                         help="Sample rate in Hz (default: 5000)")
+    parser.add_argument("--buffer-seconds", type=float, default=1.0,
+                        help="DMA buffer size in seconds (default: 1.0 -- driver holds "
+                             "buffer_seconds * sample_rate samples so slow ZMQ reads "
+                             "don't drop data)")
+    parser.add_argument("--tdms-path", default=os.environ.get("NVH_DAQ_TDMS_PATH", ""),
+                        help="Optional TDMS output path -- enables NI-DAQmx LOG_AND_READ "
+                             "logging (samples go to TDMS + ZMQ simultaneously). "
+                             "Use `{ts}` in the path for a UTC timestamp, e.g. "
+                             "./data/tdms/live_{ts}.tdms")
     parser.add_argument("--min-volt", type=float, default=-10.0)
     parser.add_argument("--max-volt", type=float, default=10.0)
     parser.add_argument(
@@ -145,10 +162,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    nidaqmx, AcquisitionType = _import_nidaqmx()
+    nidaqmx, AcquisitionType, LoggingMode, LoggingOperation = _import_nidaqmx()
 
     chunk_samples = int(args.sample_rate * 0.1)
     n_chunks = int(round(DURATION_S / 0.1))
+    buffer_samples = max(chunk_samples * 4, int(args.sample_rate * args.buffer_seconds))
 
     context = zmq.Context.instance()
     socket = context.socket(zmq.PUB)
@@ -165,12 +183,25 @@ def main() -> None:
             task.timing.cfg_samp_clk_timing(
                 rate=args.sample_rate,
                 sample_mode=AcquisitionType.CONTINUOUS,
-                samps_per_chan=chunk_samples * 4,
+                samps_per_chan=buffer_samples,
             )
+
+            if args.tdms_path:
+                tdms_path = _resolve_tdms_path(args.tdms_path)
+                Path(tdms_path).parent.mkdir(parents=True, exist_ok=True)
+                task.in_stream.configure_logging(
+                    file_path=tdms_path,
+                    logging_mode=LoggingMode.LOG_AND_READ,
+                    group_name="acquisition",
+                    operation=LoggingOperation.CREATE_OR_REPLACE,
+                )
+                print(f"live_daq: TDMS logging -> {tdms_path}", flush=True)
+
             task.start()
             print(
                 f"live_daq: acquiring from {physical} @ {args.sample_rate:.0f} Hz "
-                f"({chunk_samples} samples/chunk, {n_chunks} chunks/run)",
+                f"(buffer {buffer_samples} samples / {args.buffer_seconds:.2f} s, "
+                f"{chunk_samples} samples/chunk, {n_chunks} chunks/run)",
                 flush=True,
             )
 

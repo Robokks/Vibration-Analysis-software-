@@ -79,6 +79,43 @@ class ProducerRowTests:
         assert row.sim_btn.isEnabled()
         assert row.daq_btn.isEnabled()
 
+    def test_tdms_and_buffer_fold_into_launch_args(self, qapp):
+        row = self._make(qapp, initial=SOURCE_DAQ)
+
+        # Defaults: no TDMS, buffer at 1.0 s -- args untouched.
+        assert row._launch_args() == row.spec.args
+
+        # Turning TDMS on appends --tdms-path with the daq_ prefix.
+        row.tdms_checkbox.setChecked(True)
+        args = row._launch_args()
+        assert "--tdms-path" in args
+        tdms_arg = args[args.index("--tdms-path") + 1]
+        assert tdms_arg.endswith("daq_{ts}.tdms")
+
+        # Buffer > 1 s appends --buffer-seconds only for the DAQ source.
+        row.buffer_spin.setValue(2.5)
+        args = row._launch_args()
+        assert "--buffer-seconds" in args
+        assert args[args.index("--buffer-seconds") + 1] == "2.50"
+
+    def test_tdms_arg_uses_sim_prefix_for_simulation(self, qapp):
+        row = self._make(qapp, initial=SOURCE_SIM)
+        row.tdms_checkbox.setChecked(True)
+        args = row._launch_args()
+        tdms_arg = args[args.index("--tdms-path") + 1]
+        assert tdms_arg.endswith("sim_{ts}.tdms")
+        # Buffer flag is DAQ-only.
+        row.buffer_spin.setValue(5.0)
+        assert "--buffer-seconds" not in row._launch_args()
+
+    def test_config_widgets_disabled_while_running(self, qapp):
+        row = self._make(qapp)
+        assert row.tdms_checkbox.isEnabled()
+        assert row.buffer_spin.isEnabled()
+        row._set_status(_STATUS_RUNNING)
+        assert not row.tdms_checkbox.isEnabled()
+        assert not row.buffer_spin.isEnabled()
+
     def test_select_is_a_no_op_while_running(self, qapp):
         row = self._make(qapp)
         row._set_status(_STATUS_RUNNING)

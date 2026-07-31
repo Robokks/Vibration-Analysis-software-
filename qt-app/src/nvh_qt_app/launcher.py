@@ -23,6 +23,8 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QCheckBox,
+    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -350,7 +352,72 @@ class ProducerRow(ProcessRow):
         header_layout = self.layout().itemAt(0).layout()
         header_layout.insertWidget(2, selector_wrapper)
 
+        # Buffer + TDMS config strip -- inserted between header and log
+        # tail. Values are folded into launch args on start().
+        config_strip = QFrame()
+        strip_layout = QHBoxLayout(config_strip)
+        strip_layout.setContentsMargins(4, 0, 4, 0)
+        strip_layout.setSpacing(12)
+
+        self.tdms_checkbox = QCheckBox("Log to TDMS")
+        self.tdms_checkbox.setToolTip(
+            "Persist raw samples to a TDMS file alongside the ZMQ stream.\n"
+            "Simulation source uses nptdms; NI-DAQmx source uses the driver's "
+            "native LOG_AND_READ logging (best latency)."
+        )
+        strip_layout.addWidget(self.tdms_checkbox)
+
+        self.tdms_path_lbl = QLabel("./data/tdms/live_{ts}.tdms")
+        self.tdms_path_lbl.setStyleSheet(f"color: {palette['secondaryText']}; font-family: monospace;")
+        strip_layout.addWidget(self.tdms_path_lbl)
+
+        strip_layout.addStretch(1)
+
+        strip_layout.addWidget(QLabel("Buffer:"))
+        self.buffer_spin = QDoubleSpinBox()
+        self.buffer_spin.setDecimals(1)
+        self.buffer_spin.setRange(0.1, 30.0)
+        self.buffer_spin.setSingleStep(0.5)
+        self.buffer_spin.setValue(1.0)
+        self.buffer_spin.setSuffix(" s")
+        self.buffer_spin.setMinimumWidth(90)
+        self.buffer_spin.setToolTip(
+            "Producer-side ring buffer: how many seconds of samples the driver "
+            "holds so slow ZMQ reads don't drop data. Only meaningful for the "
+            "NI-DAQmx source."
+        )
+        strip_layout.addWidget(self.buffer_spin)
+
+        # Insert config_strip at index 1 (between the header row and the log).
+        self.layout().insertWidget(1, config_strip)
+
+        self._config_strip = config_strip
         self._apply_source_ring_style()
+
+    def _launch_args(self) -> list[str]:
+        """Fold the config-strip choices into the base spec args."""
+        args = list(self.spec.args)
+        if self.buffer_spin.value() != 1.0 and self._selected == SOURCE_DAQ:
+            args += ["--buffer-seconds", f"{self.buffer_spin.value():.2f}"]
+        if self.tdms_checkbox.isChecked():
+            base = "data/tdms"
+            fname = "sim_{ts}.tdms" if self._selected == SOURCE_SIM else "daq_{ts}.tdms"
+            args += ["--tdms-path", str(REPO_ROOT / base / fname)]
+        return args
+
+    def start(self) -> None:
+        # Override the base start() only long enough to rewrite spec.args
+        # from the config strip; keep the base class in charge of the
+        # QProcess lifecycle to avoid duplicating that logic.
+        merged_args = self._launch_args()
+        original = self.spec.args
+        self.spec.args = merged_args
+        try:
+            super().start()
+        finally:
+            # Restore the base args so a subsequent config change starts
+            # from the same clean slate.
+            self.spec.args = original
 
     def _select(self, source: str) -> None:
         if self._status in (_STATUS_RUNNING, _STATUS_STARTING):
@@ -377,6 +444,11 @@ class ProducerRow(ProcessRow):
         running = status in (_STATUS_RUNNING, _STATUS_STARTING)
         self.sim_btn.setEnabled(not running)
         self.daq_btn.setEnabled(not running)
+        # Config choices are baked into argv at launch, so they'd have
+        # no effect mid-run. Gate them so the UI can't lie about that.
+        if hasattr(self, "tdms_checkbox"):
+            self.tdms_checkbox.setEnabled(not running)
+            self.buffer_spin.setEnabled(not running)
         self._apply_source_ring_style()
 
     def apply_palette(self, palette: dict[str, str]) -> None:
@@ -506,7 +578,7 @@ class LauncherWindow(QMainWindow):
         self._theme = theme
 
         self.setWindowTitle("NVH Launcher")
-        self.setMinimumSize(920, 900)
+        self.setMinimumSize(940, 940)
         self.setWindowIcon(_window_icon())
 
         central = QWidget()

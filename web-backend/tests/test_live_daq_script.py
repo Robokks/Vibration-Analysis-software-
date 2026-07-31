@@ -31,6 +31,8 @@ class LiveDaqScriptTests:
         assert "--channel" in result.stdout
         assert "--sample-rate" in result.stdout
         assert "--pub-url" in result.stdout
+        assert "--tdms-path" in result.stdout
+        assert "--buffer-seconds" in result.stdout
 
     def test_clear_message_when_nidaqmx_missing(self):
         # If nidaqmx *is* installed (rare in CI, common on a NI workstation),

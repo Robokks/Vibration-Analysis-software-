@@ -208,10 +208,32 @@ Setup:
    python web-backend/scripts/live_daq.py --device Dev1 --channel ai0
    ```
 
-   `nvh-launcher` also has a dedicated **NI-DAQmx Producer** row that
-   runs the same command — just click Start on that row instead of the
-   synthetic one. Only one producer can hold `tcp://*:5555` at a time,
-   so stop whichever you're not using.
+   `nvh-launcher` also has a dedicated **Live Producer** row with a
+   Simulation / NI-DAQmx pill toggle — pick a source, tick **Log to
+   TDMS** if you want the raw samples on disk, set the DMA buffer
+   size, and click Start. Only one producer can hold `tcp://*:5555`
+   at a time, so stop whichever you're not using.
+
+### Buffer + TDMS logging
+
+Both producers accept `--tdms-path` and (DAQ only) `--buffer-seconds`:
+
+- **`--buffer-seconds`** on `live_daq.py` sets the NI-DAQmx DMA buffer
+  in seconds (`samps_per_chan = sample_rate * buffer_seconds`). The
+  driver holds this window in memory so a slow ZMQ read can't drop
+  samples. Default 1.0 s. Larger values trade RAM for tolerance to
+  downstream stalls.
+- **`--tdms-path`** enables raw-sample logging alongside the ZMQ
+  stream. `{ts}` in the path is substituted with a UTC timestamp so
+  parallel launches never collide (e.g. `./data/tdms/daq_{ts}.tdms`).
+  On `live_daq.py` this uses NI-DAQmx's own `LOG_AND_READ` logging
+  (best latency, driver-managed). On `live_simulator.py` it uses
+  `nptdms` (pure Python, requires `pip install -r requirements-daq.txt`
+  — missing that package prints one line and keeps streaming without
+  the TDMS side, since it's a nice-to-have not a hard dep).
+
+The launcher's Live Producer row exposes both as inline controls, so
+you don't have to hand-edit the launch command.
 
 ## Run the tests
 

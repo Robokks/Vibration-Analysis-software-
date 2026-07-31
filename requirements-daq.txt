@@ -11,3 +11,10 @@
 #   pip install -r requirements-daq.txt
 
 nidaqmx>=1.0
+
+# Pure-Python TDMS reader/writer. Used by live_simulator.py --tdms-path
+# so both producers can log to the same NI-standard file format
+# regardless of whether real NI hardware is present. Also enables
+# reading TDMS files produced by live_daq.py or LabVIEW for
+# post-acquisition analysis.
+nptdms>=1.7
