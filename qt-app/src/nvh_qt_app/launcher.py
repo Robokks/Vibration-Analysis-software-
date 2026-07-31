@@ -22,6 +22,7 @@ from PySide6.QtGui import QFont, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -65,22 +66,27 @@ class ServiceSpec:
     env: dict[str, str] = field(default_factory=dict)
 
 
-def _build_service_specs() -> list[ServiceSpec]:
-    npm = shutil.which("npm") or "npm"
-    return [
-        ServiceSpec(
-            key="sim",
-            name="Live Simulator (synthetic)",
-            description="ZeroMQ PUB — synthetic gearbox signal on tcp://*:5555",
+SOURCE_SIM = "sim"
+SOURCE_DAQ = "daq"
+
+
+def _producer_specs() -> dict[str, ServiceSpec]:
+    """The two alternative producer configurations. Only one runs at a
+    time (both bind the same ZMQ port), enforced by the shared row."""
+    return {
+        SOURCE_SIM: ServiceSpec(
+            key=SOURCE_SIM,
+            name="Live Producer — Simulation",
+            description="ZeroMQ PUB · synthetic gearbox signal on tcp://*:5555",
             program=sys.executable,
             args=[str(REPO_ROOT / "web-backend/scripts/live_simulator.py")],
         ),
-        ServiceSpec(
-            key="daq",
-            name="NI-DAQmx Producer",
+        SOURCE_DAQ: ServiceSpec(
+            key=SOURCE_DAQ,
+            name="Live Producer — NI-DAQmx",
             description=(
-                f"ZeroMQ PUB — NI-DAQmx {DEFAULT_DAQ_DEVICE}/{DEFAULT_DAQ_CHANNEL} "
-                "(real hardware or a NI MAX simulated device)"
+                f"ZeroMQ PUB · NI-DAQmx {DEFAULT_DAQ_DEVICE}/{DEFAULT_DAQ_CHANNEL} "
+                "(real hardware or NI MAX simulated device)"
             ),
             program=sys.executable,
             args=[
@@ -89,6 +95,12 @@ def _build_service_specs() -> list[ServiceSpec]:
                 "--channel", DEFAULT_DAQ_CHANNEL,
             ],
         ),
+    }
+
+
+def _build_service_specs() -> list[ServiceSpec]:
+    npm = shutil.which("npm") or "npm"
+    return [
         ServiceSpec(
             key="backend",
             name="FastAPI Backend",
@@ -283,6 +295,126 @@ class ProcessRow(QFrame):
         self.status_lbl.setText(self._status)
 
 
+class ProducerRow(ProcessRow):
+    """The Live Producer row -- one row, two mutually-exclusive sources.
+
+    Both sources bind the same ZMQ port and publish the same three
+    schemas, so only one can be active at a time. A pill-style
+    Simulation / NI-DAQmx toggle sits between the header text and the
+    Start/Stop button; changing the toggle only reconfigures the row
+    while it's idle (grayed out while running to prevent an
+    inconsistent mid-run switch).
+    """
+
+    def __init__(self, palette: dict[str, str], initial: str = SOURCE_SIM) -> None:
+        self._specs = _producer_specs()
+        super().__init__(self._specs[initial], palette)
+        self._selected = initial
+
+        self.name_lbl.setText("Live Producer")
+        self.desc_lbl.setText(self._specs[initial].description)
+
+        # Insert the source-selector between the text column (position
+        # 1 in the header) and the status label (position 2).
+        selector_wrapper = QFrame()
+        selector_wrapper.setObjectName("SourceRing")
+        wrap_layout = QHBoxLayout(selector_wrapper)
+        wrap_layout.setContentsMargins(4, 3, 4, 3)
+        wrap_layout.setSpacing(0)
+
+        self._source_group = QButtonGroup(self)
+        self._source_group.setExclusive(True)
+
+        self.sim_btn = QPushButton("Simulation")
+        self.sim_btn.setCheckable(True)
+        self.sim_btn.setObjectName("SourcePill")
+        self.sim_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._source_group.addButton(self.sim_btn)
+        wrap_layout.addWidget(self.sim_btn)
+
+        self.daq_btn = QPushButton("NI-DAQmx")
+        self.daq_btn.setCheckable(True)
+        self.daq_btn.setObjectName("SourcePill")
+        self.daq_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._source_group.addButton(self.daq_btn)
+        wrap_layout.addWidget(self.daq_btn)
+
+        if initial == SOURCE_DAQ:
+            self.daq_btn.setChecked(True)
+        else:
+            self.sim_btn.setChecked(True)
+
+        self.sim_btn.clicked.connect(lambda: self._select(SOURCE_SIM))
+        self.daq_btn.clicked.connect(lambda: self._select(SOURCE_DAQ))
+
+        header_layout = self.layout().itemAt(0).layout()
+        header_layout.insertWidget(2, selector_wrapper)
+
+        self._apply_source_ring_style()
+
+    def _select(self, source: str) -> None:
+        if self._status in (_STATUS_RUNNING, _STATUS_STARTING):
+            # Guard: shouldn't be reachable because the pills are
+            # disabled, but belt-and-braces since QButtonGroup can
+            # still fire on programmatic .setChecked().
+            self._apply_source_ring_style()
+            return
+        if source == self._selected:
+            return
+        self._selected = source
+        self.spec = self._specs[source]
+        self.desc_lbl.setText(self.spec.description)
+        self._append_log(
+            f"--- source switched to {source.upper()} ({self.spec.args[0].split('/')[-1]}) ---"
+        )
+        self._apply_source_ring_style()
+
+    def selected_source(self) -> str:
+        return self._selected
+
+    def _set_status(self, status: str) -> None:  # noqa: N802 (Qt override)
+        super()._set_status(status)
+        running = status in (_STATUS_RUNNING, _STATUS_STARTING)
+        self.sim_btn.setEnabled(not running)
+        self.daq_btn.setEnabled(not running)
+        self._apply_source_ring_style()
+
+    def apply_palette(self, palette: dict[str, str]) -> None:
+        super().apply_palette(palette)
+        self._apply_source_ring_style()
+
+    def _apply_source_ring_style(self) -> None:
+        panel = self._palette["panel"]
+        secondary = self._palette["secondaryText"]
+        accent = self._palette["accentSecondary"]
+        background = self._palette["background"]
+        # A pill-shaped segmented control ("ring") whose selected half
+        # inverts to the cyan accent so it reads as ON-air at a glance.
+        style = f"""
+            QFrame#SourceRing {{
+                background-color: {background};
+                border: 1px solid {panel};
+                border-radius: 14px;
+            }}
+            QPushButton#SourcePill {{
+                background-color: transparent;
+                color: {secondary};
+                border: none;
+                padding: 4px 14px;
+                border-radius: 12px;
+                font-weight: 600;
+            }}
+            QPushButton#SourcePill:checked {{
+                background-color: {accent};
+                color: {background};
+            }}
+            QPushButton#SourcePill:disabled {{
+                color: {secondary};
+            }}
+        """
+        self.findChild(QFrame, "SourceRing").setStyleSheet(style)
+
+
 class OneShotBar(QFrame):
     """Top row of one-click actions: seed data, analysis demo, open web UI."""
 
@@ -411,6 +543,13 @@ class LauncherWindow(QMainWindow):
 
         self._rows: list[ProcessRow] = []
         palette = self._current_palette()
+
+        # Live Producer row first, with its Simulation / NI-DAQmx ring.
+        self.producer_row = ProducerRow(palette, initial=SOURCE_SIM)
+        self.producer_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._rows.append(self.producer_row)
+        outer.addWidget(self.producer_row)
+
         for spec in _build_service_specs():
             row = ProcessRow(spec, palette)
             row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)

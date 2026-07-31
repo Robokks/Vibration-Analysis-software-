@@ -2,7 +2,11 @@ from nvh_qt_app.launcher import (
     LauncherWindow,
     OneShotBar,
     ProcessRow,
+    ProducerRow,
+    SOURCE_DAQ,
+    SOURCE_SIM,
     _build_service_specs,
+    _producer_specs,
     _STATUS_CRASHED,
     _STATUS_IDLE,
     _STATUS_RUNNING,
@@ -16,20 +20,10 @@ class LauncherWindowTests:
         theme = ThemeManager(initial=PALETTE_DARK)
         window = LauncherWindow(theme)
 
-        assert len(window._rows) == 5
-        service_keys = [row.spec.key for row in window._rows]
-        assert service_keys == ["sim", "daq", "backend", "web", "qt"]
-
-        window.close()
-
-    def test_daq_row_targets_live_daq_script(self, qapp):
-        theme = ThemeManager(initial=PALETTE_DARK)
-        window = LauncherWindow(theme)
-
-        daq_row = next(r for r in window._rows if r.spec.key == "daq")
-        assert daq_row.spec.args[0].endswith("live_daq.py")
-        assert "--device" in daq_row.spec.args
-        assert "--channel" in daq_row.spec.args
+        # Row 0 is the shared Live Producer, then the three fixed services.
+        assert len(window._rows) == 4
+        assert isinstance(window._rows[0], ProducerRow)
+        assert [r.spec.key for r in window._rows[1:]] == ["backend", "web", "qt"]
 
         window.close()
 
@@ -49,6 +43,55 @@ class LauncherWindowTests:
             assert row._palette["secondaryText"] == light["secondaryText"]
 
         window.close()
+
+
+class ProducerRowTests:
+    def _make(self, qapp, initial=SOURCE_SIM):
+        palette = load_tokens()["color"]["palettes"][PALETTE_DARK]
+        return ProducerRow(palette, initial=initial)
+
+    def test_defaults_to_simulation(self, qapp):
+        row = self._make(qapp)
+        assert row.selected_source() == SOURCE_SIM
+        assert row.sim_btn.isChecked()
+        assert not row.daq_btn.isChecked()
+        assert row.spec.key == SOURCE_SIM
+        assert "live_simulator.py" in row.spec.args[0]
+
+    def test_click_daq_switches_spec(self, qapp):
+        row = self._make(qapp)
+        row.daq_btn.setChecked(True)
+        row._select(SOURCE_DAQ)
+        assert row.selected_source() == SOURCE_DAQ
+        assert row.spec.key == SOURCE_DAQ
+        assert "live_daq.py" in row.spec.args[0]
+        assert "--device" in row.spec.args
+        assert "--channel" in row.spec.args
+
+    def test_pills_disabled_while_running(self, qapp):
+        row = self._make(qapp)
+        assert row.sim_btn.isEnabled()
+        assert row.daq_btn.isEnabled()
+        row._set_status(_STATUS_RUNNING)
+        assert not row.sim_btn.isEnabled()
+        assert not row.daq_btn.isEnabled()
+        row._set_status(_STATUS_IDLE)
+        assert row.sim_btn.isEnabled()
+        assert row.daq_btn.isEnabled()
+
+    def test_select_is_a_no_op_while_running(self, qapp):
+        row = self._make(qapp)
+        row._set_status(_STATUS_RUNNING)
+        row._select(SOURCE_DAQ)  # ignored -- can't switch mid-run
+        assert row.selected_source() == SOURCE_SIM
+
+
+class ProducerSpecTests:
+    def test_both_producers_defined(self):
+        specs = _producer_specs()
+        assert set(specs.keys()) == {SOURCE_SIM, SOURCE_DAQ}
+        assert "live_simulator.py" in specs[SOURCE_SIM].args[0]
+        assert "live_daq.py" in specs[SOURCE_DAQ].args[0]
 
 
 class ProcessRowTests:
