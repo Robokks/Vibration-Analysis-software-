@@ -74,8 +74,8 @@ def main() -> None:
     parser.add_argument("--poll-hz", type=float, default=10.0)
     parser.add_argument(
         "--pub-url",
-        default=os.environ.get("NVH_LIVE_PUB_URL", "tcp://127.0.0.1:5555"),
-        help="ZMQ PUB socket bind URL",
+        default=os.environ.get("NVH_PLC_PUB_URL", "tcp://127.0.0.1:5556"),
+        help="ZMQ PUB socket bind URL for PLC events (default: tcp://127.0.0.1:5556)",
     )
     args = parser.parse_args()
 

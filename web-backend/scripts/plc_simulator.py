@@ -41,11 +41,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="PLC simulator: scripted PlcStateUpdate over ZMQ PUB")
     parser.add_argument(
         "--pub-url",
-        default=os.environ.get("NVH_LIVE_PUB_URL", "tcp://127.0.0.1:5555"),
-        help="ZMQ PUB socket bind URL (default: tcp://127.0.0.1:5555 or $NVH_LIVE_PUB_URL)",
+        default=os.environ.get("NVH_PLC_PUB_URL", "tcp://127.0.0.1:5556"),
+        help="ZMQ PUB socket bind URL for PLC events "
+             "(default: tcp://127.0.0.1:5556 or $NVH_PLC_PUB_URL -- "
+             "distinct from the signal producer's 5555 so both can PUB in parallel)",
     )
-    parser.add_argument("--speed", type=float, default=1.0,
-                        help="Time multiplier for the scripted holds (default 1.0)")
+    parser.add_argument("--speed", type=float,
+                        default=float(os.environ.get("NVH_PLC_SPEED", "1.0")),
+                        help="Time multiplier for the scripted holds (default 1.0 or $NVH_PLC_SPEED)")
     parser.add_argument("--once", action="store_true",
                         help="Run the sequence once and exit (default: loop forever)")
     args = parser.parse_args()

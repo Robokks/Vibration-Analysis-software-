@@ -38,7 +38,13 @@ from pathlib import Path
 import numpy as np
 import zmq
 
-from nvh_api_schemas.realtime import LiveDcUpdate, LiveSignalChunk, LiveTestRunUpdate
+from nvh_api_schemas.realtime import (
+    LiveDcUpdate,
+    LiveSignalChunk,
+    LiveTestRunUpdate,
+    PlcStateUpdate,
+)
+from nvh_contract.state import NvhStateMachine, Transition
 
 # Keep these in lockstep with live_simulator.py -- same virtual station,
 # same channel labels, so a downstream client can flip between producers
@@ -135,6 +141,80 @@ def _resolve_tdms_path(raw: str) -> str:
     return raw.replace("{ts}", ts)
 
 
+def _run_plc_driven_daq(socket, task, sample_rate_hz, chunk_samples, plc_url: str) -> None:
+    """Interleaves a PLC SUB poll with continuous DAQ reads; only emits
+    a chunk while state machine says log_active. Mirrors the pattern in
+    live_simulator._run_plc_driven_mode but reads real hardware."""
+    ctx = zmq.Context.instance()
+    plc_sub = ctx.socket(zmq.SUB)
+    plc_sub.connect(plc_url)
+    plc_sub.setsockopt_string(zmq.SUBSCRIBE, "")
+    poller = zmq.Poller()
+    poller.register(plc_sub, zmq.POLLIN)
+
+    print(f"live_daq: SUB {plc_url} for PLC state; chunks gated on log_active", flush=True)
+
+    sm = NvhStateMachine()
+    active_test_run_id: str | None = None
+    active_dc_id: str | None = None
+    chunk_index = 0
+
+    while True:
+        # Non-blocking PLC poll first.
+        events = dict(poller.poll(timeout=0))
+        if plc_sub in events:
+            update = PlcStateUpdate.model_validate_json(plc_sub.recv_string())
+            for t in sm.apply(update):
+                if t == Transition.RUN_STARTED:
+                    active_test_run_id = str(uuid.uuid4())
+                    active_dc_id = str(uuid.uuid4())
+                    chunk_index = 0
+                    _send(socket, LiveTestRunUpdate(
+                        test_run_id=active_test_run_id, station_id=STATION_ID, status="RUNNING",
+                    ))
+                elif t == Transition.FINAL_LOG_REQUESTED and active_dc_id and sm.gear_label and sm.direction:
+                    _send(socket, LiveDcUpdate(
+                        dc_id=active_dc_id,
+                        test_run_id=active_test_run_id or active_dc_id,
+                        station_id=STATION_ID,
+                        gear_label=sm.gear_label,
+                        direction=sm.direction,
+                        stamp="PASS",
+                        fail_reason_codes=[],
+                    ))
+                elif t == Transition.RUN_STOPPED and active_test_run_id:
+                    _send(socket, LiveTestRunUpdate(
+                        test_run_id=active_test_run_id, station_id=STATION_ID,
+                        status="COMPLETED", overall_result="PASS",
+                    ))
+                    active_test_run_id = None
+                    active_dc_id = None
+
+        # Always drain the DAQ buffer at the chunk cadence (samples the
+        # driver holds must be read regardless of log state, otherwise
+        # the buffer overflows). Discard when log is inactive.
+        raw = task.read(number_of_samples_per_channel=chunk_samples)
+        if sm.log_active and active_test_run_id and active_dc_id and sm.gear_label and sm.direction:
+            values = np.asarray(raw, dtype=np.float64)
+            t0 = chunk_index * chunk_samples / sample_rate_hz
+            time_s = (t0 + np.arange(chunk_samples) / sample_rate_hz).tolist()
+            rpm_slice = np.full(chunk_samples, 1500.0).tolist()  # placeholder; Phase G reads counter task
+            _send(socket, LiveSignalChunk(
+                test_run_id=active_test_run_id,
+                dc_id=active_dc_id,
+                station_id=STATION_ID,
+                gear_label=sm.gear_label,
+                direction=sm.direction,
+                channel_name=CHANNEL_NAME,
+                sample_rate_hz=sample_rate_hz,
+                chunk_index=chunk_index,
+                time_s=time_s,
+                values=values.tolist(),
+                rpm=rpm_slice,
+            ))
+            chunk_index += 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Publish NI-DAQmx samples over ZMQ (drop-in for live_simulator.py)")
     parser.add_argument("--device", default=os.environ.get("NVH_DAQ_DEVICE", "Dev1"),
@@ -159,6 +239,14 @@ def main() -> None:
         "--pub-url",
         default=os.environ.get("NVH_LIVE_PUB_URL", "tcp://127.0.0.1:5555"),
         help="ZMQ PUB socket bind URL (default: tcp://127.0.0.1:5555 or $NVH_LIVE_PUB_URL)",
+    )
+    parser.add_argument(
+        "--plc-url",
+        default=os.environ.get("NVH_PLC_PUB_URL", ""),
+        help="ZMQ SUB URL of the PLC event producer. If set, runs in "
+             "PLC-driven mode: continuously reads samples from the DAQ "
+             "but only publishes chunks while the state machine's "
+             "log_active is true.",
     )
     args = parser.parse_args()
 
@@ -205,9 +293,12 @@ def main() -> None:
                 flush=True,
             )
 
-            while True:
-                _emit_run(socket, task, args.sample_rate, chunk_samples, n_chunks)
-                time.sleep(IDLE_BETWEEN_RUNS_S)
+            if args.plc_url:
+                _run_plc_driven_daq(socket, task, args.sample_rate, chunk_samples, args.plc_url)
+            else:
+                while True:
+                    _emit_run(socket, task, args.sample_rate, chunk_samples, n_chunks)
+                    time.sleep(IDLE_BETWEEN_RUNS_S)
     except KeyboardInterrupt:
         print("live_daq: shutting down", flush=True)
     finally:
