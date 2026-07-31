@@ -59,17 +59,31 @@ def _real_com_client(context_url: str, heartbeat_url: str) -> _DataSocketClient:
             value = self._in.Value
             if not value:
                 return None
-            # DataSocket returns a struct as a comma-separated key=value
-            # blob for simplicity; adjust to your dashboard's actual
-            # convention if it uses XML/JSON on the wire.
+            # Phase O Bug 6: JSON on the wire, not k=v pairs. The
+            # previous parser (`str(value).split(",")` then split on `=`)
+            # broke on operator names or serials containing commas and
+            # silently returned None on any parse error, blocking all
+            # context propagation. If a real dashboard emits XML we can
+            # add a branch here, but JSON is the only well-defined
+            # format for now.
             try:
-                return dict(item.split("=", 1) for item in str(value).split(",") if "=" in item)
-            except Exception:  # noqa: BLE001
+                parsed = json.loads(str(value))
+            except (ValueError, TypeError) as exc:
+                print(
+                    f"dashboard_bridge: DataSocket read_context JSON decode failed: {exc}",
+                    file=sys.stderr, flush=True,
+                )
                 return None
+            if not isinstance(parsed, dict):
+                print(
+                    f"dashboard_bridge: DataSocket payload was {type(parsed).__name__}, expected dict",
+                    file=sys.stderr, flush=True,
+                )
+                return None
+            return parsed
 
         def write_heartbeat(self, blob: dict[str, Any]) -> None:
-            payload = ",".join(f"{k}={v}" for k, v in blob.items())
-            self._out.Value = payload
+            self._out.Value = json.dumps(blob)
 
     return _Impl()
 
@@ -86,6 +100,20 @@ def _post_context(backend_url: str, body: dict[str, Any]) -> None:
             resp.read()
     except Exception as exc:  # noqa: BLE001
         print(f"dashboard_bridge: context POST failed: {exc}", file=sys.stderr, flush=True)
+
+
+def _fetch_plc_state(backend_url: str) -> dict[str, Any]:
+    """Phase O Bug 4: real gear_id / nvh_id come from the backend's
+    LiveRelay cache, not from the dashboard-IN payload (which never
+    contained them). On any error, fall back to the -1 sentinels --
+    heartbeat is best-effort, don't kill the loop."""
+    try:
+        with urllib.request.urlopen(
+            f"{backend_url.rstrip('/')}/plc/state", timeout=1.5
+        ) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return {"gear_id": -1, "nvh_id": -1}
 
 
 def run_bridge(
@@ -121,11 +149,12 @@ def run_bridge(
 
         now = time.monotonic()
         if now >= next_hb_at:
+            plc_state = _fetch_plc_state(backend_url)
             client.write_heartbeat({
                 "status": "OK",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "current_gear_id": last_context.get("gear_id", -1) if last_context else -1,
-                "current_nvh_id": last_context.get("nvh_id", -1) if last_context else -1,
+                "current_gear_id": plc_state.get("gear_id", -1),
+                "current_nvh_id": plc_state.get("nvh_id", -1),
             })
             next_hb_at = now + hb_period
 

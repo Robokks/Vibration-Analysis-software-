@@ -9,7 +9,7 @@ from nvh_contract.db import init_db, make_engine, make_session_factory
 
 from nvh_web_backend import config
 from nvh_web_backend.live_relay import LiveRelay
-from nvh_web_backend.routers import dashboard, health, live, models, reports, summaries, test_runs
+from nvh_web_backend.routers import dashboard, health, live, models, plc_state, reports, summaries, test_runs
 
 
 def create_app(db_url: str | None = None) -> FastAPI:
@@ -50,5 +50,6 @@ def create_app(db_url: str | None = None) -> FastAPI:
     app.include_router(live.router)
     app.include_router(summaries.router)
     app.include_router(dashboard.router)
+    app.include_router(plc_state.router)
 
     return app

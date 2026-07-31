@@ -69,6 +69,10 @@ class DashboardBridgeTests:
     def test_heartbeat_writes_each_period(self, monkeypatch):
         bridge = _load_bridge()
         monkeypatch.setattr(bridge, "_post_context", lambda *a, **k: None)
+        # Phase O Bug 4: heartbeat fetches PLC state from the backend.
+        # Stub the fetch out so this test doesn't need a live backend.
+        monkeypatch.setattr(bridge, "_fetch_plc_state",
+                            lambda *_a, **_k: {"gear_id": -1, "nvh_id": -1})
 
         client = FakeClient([{"model_name": "M", "serial_no": "S", "serial_rpt": "1"}])
         bridge.run_bridge(
@@ -81,3 +85,46 @@ class DashboardBridgeTests:
         assert blob["status"] == "OK"
         assert "timestamp" in blob
         assert "current_gear_id" in blob
+
+    def test_heartbeat_uses_current_plc_state_from_backend(self, monkeypatch):
+        # Phase O Bug 4: previously the heartbeat pulled gear/nvh from
+        # `last_context` (the dashboard-IN payload), which never contains
+        # those keys. Fix: fetch them from the backend's PLC-state cache.
+        bridge = _load_bridge()
+        monkeypatch.setattr(bridge, "_post_context", lambda *a, **k: None)
+        monkeypatch.setattr(bridge, "_fetch_plc_state",
+                            lambda *_a, **_k: {"gear_id": 3, "nvh_id": 1})
+
+        client = FakeClient([{"model_name": "M", "serial_no": "S", "serial_rpt": "1"}])
+        bridge.run_bridge(
+            backend_url="http://ignored", station_id="ST",
+            poll_hz=100.0, heartbeat_hz=1000.0,
+            client_factory=lambda: client, max_iterations=3,
+        )
+        assert client.heartbeats
+        assert client.heartbeats[-1]["current_gear_id"] == 3
+        assert client.heartbeats[-1]["current_nvh_id"] == 1
+
+    def test_context_change_with_comma_in_operator_name_still_posts(self, monkeypatch):
+        # Phase O Bug 6 (dashboard side): the FakeClient here mirrors the
+        # bridge's real DataSocket JSON contract. A payload with a comma
+        # in a value used to break the old k=v parser and silently drop
+        # the update -- with JSON on the wire it round-trips intact.
+        bridge = _load_bridge()
+        posts: list[dict] = []
+        monkeypatch.setattr(bridge, "_post_context", lambda url, body: posts.append(body))
+
+        client = FakeClient([{
+            "model_name": "MODEL-A",
+            "serial_no": "SN-1",
+            "serial_rpt": "R2",
+            "operator_name": "Doe, Jane",  # comma in operator name
+        }])
+        bridge.run_bridge(
+            backend_url="http://ignored", station_id="ST-1",
+            poll_hz=100.0, heartbeat_hz=100.0,
+            client_factory=lambda: client, max_iterations=2,
+        )
+        assert posts
+        assert posts[0]["operator_name"] == "Doe, Jane"
+        assert posts[0]["serial_rpt"] == "R2"

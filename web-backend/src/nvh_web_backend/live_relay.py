@@ -6,13 +6,21 @@ WebSocket owns one queue, so a slow client only backs up its own queue,
 never the shared receive loop -- if a queue fills up we drop the oldest
 message rather than blocking the fan-out. Payloads are forwarded as-is;
 schema validation is the sender's and receiver's job (see
-`nvh_api_schemas.realtime`)."""
+`nvh_api_schemas.realtime`).
+
+Phase O Bug 4 addition: the receive loop also sniffs `type=plc_state`
+messages and remembers the latest one in `plc_state_cache`, so the
+dashboard bridge's heartbeat loop can fetch it via `GET /plc/state`
+instead of trying to read gear/nvh keys off the dashboard's own
+context payload (which never contains them)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+from typing import Any
 
 import zmq
 import zmq.asyncio
@@ -29,6 +37,16 @@ class LiveRelay:
         self._socket: zmq.asyncio.Socket | None = None
         self._task: asyncio.Task[None] | None = None
         self._queues: set[asyncio.Queue[str]] = set()
+        # Latest plc_state event seen on the SUB, cached so the
+        # dashboard bridge's heartbeat can read the current PLC gear/
+        # nvh id without needing its own PLC SUB socket. Populated by
+        # _recv_loop when a message with `type == "plc_state"` arrives.
+        self._plc_state_cache: dict[str, Any] = {
+            "nvh_cmd": "IDLE",
+            "gear_id": -1,
+            "nvh_id": -1,
+            "final_log_trigger": False,
+        }
 
     async def start(self) -> None:
         self._context = zmq.asyncio.Context()
@@ -58,10 +76,31 @@ class LiveRelay:
     def unsubscribe(self, queue: asyncio.Queue[str]) -> None:
         self._queues.discard(queue)
 
+    def plc_state(self) -> dict[str, Any]:
+        """Snapshot of the last-seen PLC state. Safe to call from any
+        thread -- the cache is a plain dict updated only by _recv_loop
+        (single-writer via `dict.update`) and Python dict ops are
+        atomic w.r.t. the GIL."""
+        return dict(self._plc_state_cache)
+
     async def _recv_loop(self) -> None:
         assert self._socket is not None
         while True:
             message = await self._socket.recv_string()
+            # Sniff plc_state to keep the cache warm. Malformed JSON or
+            # missing fields is expected during startup / non-PLC
+            # producers -- log at debug, don't fail.
+            try:
+                payload = json.loads(message)
+                if isinstance(payload, dict) and payload.get("type") == "plc_state":
+                    self._plc_state_cache = {
+                        "nvh_cmd": payload.get("nvh_cmd", "IDLE"),
+                        "gear_id": payload.get("gear_id", -1),
+                        "nvh_id": payload.get("nvh_id", -1),
+                        "final_log_trigger": payload.get("final_log_trigger", False),
+                    }
+            except (ValueError, TypeError):
+                pass  # not JSON or not a dict -- pass through unchanged
             for queue in list(self._queues):
                 self._enqueue(queue, message)
 
