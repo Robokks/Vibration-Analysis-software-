@@ -10,6 +10,7 @@ from nvh_api_schemas import (
     LiveSignalChunk,
     LiveTestRunUpdate,
     PassRateRollup,
+    PlcStateUpdate,
 )
 
 
@@ -69,3 +70,39 @@ def test_live_event_tagged_union_dispatches_by_type():
         time_s=[], values=[], rpm=[],
     ).model_dump_json()
     assert isinstance(adapter.validate_json(chunk_payload), LiveSignalChunk)
+
+    plc_payload = PlcStateUpdate(nvh_cmd="START", gear_id=1, nvh_id=0).model_dump_json()
+    assert isinstance(adapter.validate_json(plc_payload), PlcStateUpdate)
+
+
+def test_plc_state_update_defaults_and_serialization():
+    update = PlcStateUpdate(nvh_cmd="START", gear_id=1, nvh_id=0)
+    assert update.type == "plc_state"
+    assert update.final_log_trigger is False
+    dumped = json.loads(update.model_dump_json())
+    assert dumped == {
+        "type": "plc_state", "nvh_cmd": "START", "gear_id": 1,
+        "nvh_id": 0, "final_log_trigger": False,
+    }
+
+
+def test_plc_state_update_rejects_invalid_cmd():
+    with pytest.raises(ValidationError):
+        PlcStateUpdate(nvh_cmd="BOGUS", gear_id=0, nvh_id=-1)
+
+
+def test_live_signal_chunk_channels_defaults_empty_and_accepts_multi():
+    chunk = LiveSignalChunk(
+        test_run_id="r", dc_id="d", station_id="s", gear_label="R", direction="RU",
+        channel_name="vib_a", sample_rate_hz=5000.0, chunk_index=0,
+        time_s=[0.0], values=[0.1], rpm=[1000.0],
+    )
+    assert chunk.channels == {}
+
+    multi = LiveSignalChunk(
+        test_run_id="r", dc_id="d", station_id="s", gear_label="R", direction="RU",
+        channel_name="vib_a", sample_rate_hz=5000.0, chunk_index=0,
+        time_s=[0.0], values=[0.1], rpm=[1000.0],
+        channels={"vib_a": [0.1], "mic": [0.2]},
+    )
+    assert multi.channels["mic"] == [0.2]

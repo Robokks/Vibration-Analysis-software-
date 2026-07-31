@@ -7,7 +7,14 @@ from nvh_api_schemas.catalog import (
     TableConfigParameterUpdate,
 )
 from nvh_api_schemas.management import FailReasonRollup, PassRateRollup
-from nvh_api_schemas.realtime import LiveDcUpdate, LiveEvent, LiveEventEnvelope, LiveSignalChunk, LiveTestRunUpdate
+from nvh_api_schemas.realtime import (
+    LiveDcUpdate,
+    LiveEvent,
+    LiveEventEnvelope,
+    LiveSignalChunk,
+    LiveTestRunUpdate,
+    PlcStateUpdate,
+)
 from nvh_api_schemas.report import (
     CodeResultReportOut,
     CodeResultRowOut,
@@ -47,6 +54,7 @@ __all__ = [
     "LiveEventEnvelope",
     "LiveSignalChunk",
     "LiveTestRunUpdate",
+    "PlcStateUpdate",
     "CodeResultReportOut",
     "CodeResultRowOut",
     "ConsolidatedReportOut",
