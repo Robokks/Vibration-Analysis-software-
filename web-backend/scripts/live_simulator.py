@@ -290,6 +290,13 @@ def _run_plc_driven_mode(
     # closes when a new one takes over. `tdms_writer` (the legacy
     # single-file --tdms-path writer) still receives every chunk when
     # rollover_base_dir is None.
+    #
+    # Phase O Bug 7: both `rollover_writer` and `plc_sub` are opened
+    # here, and the outer `main()`'s finally-block used to only close
+    # `tdms_writer` (the legacy single-file writer) + the PUB socket.
+    # Now the try/finally around the main loop below explicitly closes
+    # both -- prevents handle leaks that on Windows left the last TDMS
+    # file in a "not fully written" state.
     rollover_writer = None
     rollover_key: tuple[int, int] | None = None
 
@@ -304,94 +311,113 @@ def _run_plc_driven_mode(
             model_id, serial_no, serial_rpt,
         )
 
-    while True:
-        # Non-blocking-ish poll: wait until it's time for the next chunk,
-        # but also wake early on incoming PLC events.
-        now = time.monotonic()
-        wait_ms = max(0, int((next_chunk_at - now) * 1000))
-        events = dict(poller.poll(timeout=wait_ms))
+    # Phase O Bug 7: try/finally so `rollover_writer` and `plc_sub`
+    # are closed on any exit path (KeyboardInterrupt from the outer
+    # try, or any exception below). Both were previously leaking until
+    # process teardown -- on Windows that left the last TDMS file
+    # partially written.
+    try:
+        while True:
+            # Non-blocking-ish poll: wait until it's time for the next chunk,
+            # but also wake early on incoming PLC events.
+            now = time.monotonic()
+            wait_ms = max(0, int((next_chunk_at - now) * 1000))
+            events = dict(poller.poll(timeout=wait_ms))
 
-        if plc_sub in events:
-            payload = plc_sub.recv_string()
-            update = PlcStateUpdate.model_validate_json(payload)
-            transitions = sm.apply(update)
-            for t in transitions:
-                if t == Transition.RUN_STARTED:
-                    active_test_run_id = str(uuid.uuid4())
-                    active_dc_id = str(uuid.uuid4())
-                    chunk_index = 0
-                    _send(socket, LiveTestRunUpdate(
-                        test_run_id=active_test_run_id, station_id=STATION_ID, status="RUNNING",
-                    ))
-                    _switch_rollover_writer(sm.gear_id, sm.nvh_id)
-                    print(f"live_simulator: RUN_STARTED test_run_id={active_test_run_id[:8]} trial={sm.trial_no}", flush=True)
-                elif t in (Transition.GEAR_CHANGED, Transition.NVH_ID_CHANGED):
-                    _switch_rollover_writer(sm.gear_id, sm.nvh_id)
-                elif t == Transition.FINAL_LOG_REQUESTED:
-                    if active_dc_id and sm.gear_label and sm.direction:
-                        _send(socket, LiveDcUpdate(
-                            dc_id=active_dc_id,
-                            test_run_id=active_test_run_id or active_dc_id,
-                            station_id=STATION_ID,
-                            gear_label=sm.gear_label,
-                            direction=sm.direction,
-                            stamp="PASS",  # producer doesn't grade; downstream does
-                            fail_reason_codes=[],
-                        ))
-                        print(f"live_simulator: FINAL_LOG_REQUESTED dc_id={active_dc_id[:8]}", flush=True)
-                        if backend_url:
-                            _post_summary(backend_url, {
-                                "test_run_id": active_test_run_id or active_dc_id,
-                                "dc_id": active_dc_id,
-                                "model_id": model_id,
-                                "serial_no": serial_no,
-                                "serial_rpt": serial_rpt,
-                                "gear_id": sm.gear_id,
-                                "nvh_id": sm.nvh_id,
-                                "stamp": "PASS",
-                                "fail_reason_codes": [],
-                            })
-                elif t == Transition.RUN_STOPPED:
-                    if active_test_run_id:
+            if plc_sub in events:
+                payload = plc_sub.recv_string()
+                update = PlcStateUpdate.model_validate_json(payload)
+                transitions = sm.apply(update)
+                for t in transitions:
+                    if t == Transition.RUN_STARTED:
+                        active_test_run_id = str(uuid.uuid4())
+                        active_dc_id = str(uuid.uuid4())
+                        chunk_index = 0
                         _send(socket, LiveTestRunUpdate(
-                            test_run_id=active_test_run_id, station_id=STATION_ID,
-                            status="COMPLETED", overall_result="PASS",
+                            test_run_id=active_test_run_id, station_id=STATION_ID, status="RUNNING",
                         ))
-                        print(f"live_simulator: RUN_STOPPED test_run_id={active_test_run_id[:8]}", flush=True)
-                    active_test_run_id = None
-                    active_dc_id = None
-                    if rollover_writer is not None:
-                        rollover_writer.close()
-                        rollover_writer = None
-                        rollover_key = None
+                        _switch_rollover_writer(sm.gear_id, sm.nvh_id)
+                        print(f"live_simulator: RUN_STARTED test_run_id={active_test_run_id[:8]} trial={sm.trial_no}", flush=True)
+                    elif t in (Transition.GEAR_CHANGED, Transition.NVH_ID_CHANGED):
+                        _switch_rollover_writer(sm.gear_id, sm.nvh_id)
+                    elif t == Transition.FINAL_LOG_REQUESTED:
+                        if active_dc_id and sm.gear_label and sm.direction:
+                            _send(socket, LiveDcUpdate(
+                                dc_id=active_dc_id,
+                                test_run_id=active_test_run_id or active_dc_id,
+                                station_id=STATION_ID,
+                                gear_label=sm.gear_label,
+                                direction=sm.direction,
+                                stamp="PASS",  # producer doesn't grade; downstream does
+                                fail_reason_codes=[],
+                            ))
+                            print(f"live_simulator: FINAL_LOG_REQUESTED dc_id={active_dc_id[:8]}", flush=True)
+                            if backend_url:
+                                _post_summary(backend_url, {
+                                    "test_run_id": active_test_run_id or active_dc_id,
+                                    "dc_id": active_dc_id,
+                                    "model_id": model_id,
+                                    "serial_no": serial_no,
+                                    "serial_rpt": serial_rpt,
+                                    "gear_id": sm.gear_id,
+                                    "nvh_id": sm.nvh_id,
+                                    "stamp": "PASS",
+                                    "fail_reason_codes": [],
+                                })
+                    elif t == Transition.RUN_STOPPED:
+                        if active_test_run_id:
+                            _send(socket, LiveTestRunUpdate(
+                                test_run_id=active_test_run_id, station_id=STATION_ID,
+                                status="COMPLETED", overall_result="PASS",
+                            ))
+                            print(f"live_simulator: RUN_STOPPED test_run_id={active_test_run_id[:8]}", flush=True)
+                        active_test_run_id = None
+                        active_dc_id = None
+                        if rollover_writer is not None:
+                            rollover_writer.close()
+                            rollover_writer = None
+                            rollover_key = None
 
-        # Time-slice: emit a chunk if we're actively logging.
-        if time.monotonic() >= next_chunk_at:
-            if sm.log_active and active_test_run_id and active_dc_id and sm.gear_label and sm.direction:
-                time_s, values_v, rpm = _synth_chunk(sm.gear_label, chunk_index, SAMPLE_RATE_HZ, rng)
-                # Calibration scaling raw V -> EU. Identity by default.
-                values_eu = scale_v_to_eu(values_v, sensor_sensitivity_mv_per_eu, pregain_db)
-                values_list = values_eu.tolist()
-                _send(socket, LiveSignalChunk(
-                    test_run_id=active_test_run_id,
-                    dc_id=active_dc_id,
-                    station_id=STATION_ID,
-                    gear_label=sm.gear_label,
-                    direction=sm.direction,
-                    channel_name=CHANNEL_NAME,
-                    sample_rate_hz=SAMPLE_RATE_HZ,
-                    chunk_index=chunk_index,
-                    time_s=time_s.tolist(),
-                    values=values_list,
-                    rpm=rpm.tolist(),
-                    channels={CHANNEL_NAME: values_list},
-                ))
-                if tdms_writer is not None:
-                    _write_tdms_chunk(tdms_writer, values_eu, rpm, SAMPLE_RATE_HZ, CHANNEL_NAME)
-                if rollover_writer is not None:
-                    _write_tdms_chunk(rollover_writer, values_eu, rpm, SAMPLE_RATE_HZ, CHANNEL_NAME)
-                chunk_index += 1
-            next_chunk_at += CHUNK_PERIOD_S
+            # Time-slice: emit a chunk if we're actively logging.
+            if time.monotonic() >= next_chunk_at:
+                if sm.log_active and active_test_run_id and active_dc_id and sm.gear_label and sm.direction:
+                    time_s, values_v, rpm = _synth_chunk(sm.gear_label, chunk_index, SAMPLE_RATE_HZ, rng)
+                    # Calibration scaling raw V -> EU. Identity by default.
+                    values_eu = scale_v_to_eu(values_v, sensor_sensitivity_mv_per_eu, pregain_db)
+                    values_list = values_eu.tolist()
+                    _send(socket, LiveSignalChunk(
+                        test_run_id=active_test_run_id,
+                        dc_id=active_dc_id,
+                        station_id=STATION_ID,
+                        gear_label=sm.gear_label,
+                        direction=sm.direction,
+                        channel_name=CHANNEL_NAME,
+                        sample_rate_hz=SAMPLE_RATE_HZ,
+                        chunk_index=chunk_index,
+                        time_s=time_s.tolist(),
+                        values=values_list,
+                        rpm=rpm.tolist(),
+                        channels={CHANNEL_NAME: values_list},
+                    ))
+                    if tdms_writer is not None:
+                        _write_tdms_chunk(tdms_writer, values_eu, rpm, SAMPLE_RATE_HZ, CHANNEL_NAME)
+                    if rollover_writer is not None:
+                        _write_tdms_chunk(rollover_writer, values_eu, rpm, SAMPLE_RATE_HZ, CHANNEL_NAME)
+                    chunk_index += 1
+                next_chunk_at += CHUNK_PERIOD_S
+    finally:
+        # Phase O Bug 7: close both handles regardless of how the
+        # loop exits (KeyboardInterrupt, ValueError from a rogue
+        # PLC packet, any other exception).
+        if rollover_writer is not None:
+            try:
+                rollover_writer.close()
+            except Exception as exc:
+                print(f"live_simulator: rollover_writer.close error: {exc}", file=sys.stderr, flush=True)
+        try:
+            plc_sub.close(linger=0)
+        except Exception as exc:
+            print(f"live_simulator: plc_sub.close error: {exc}", file=sys.stderr, flush=True)
 
 
 def main() -> None:

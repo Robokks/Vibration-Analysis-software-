@@ -165,63 +165,71 @@ def _run_plc_driven_daq(
     active_dc_id: str | None = None
     chunk_index = 0
 
-    while True:
-        # Non-blocking PLC poll first.
-        events = dict(poller.poll(timeout=0))
-        if plc_sub in events:
-            update = PlcStateUpdate.model_validate_json(plc_sub.recv_string())
-            for t in sm.apply(update):
-                if t == Transition.RUN_STARTED:
-                    active_test_run_id = str(uuid.uuid4())
-                    active_dc_id = str(uuid.uuid4())
-                    chunk_index = 0
-                    _send(socket, LiveTestRunUpdate(
-                        test_run_id=active_test_run_id, station_id=STATION_ID, status="RUNNING",
-                    ))
-                elif t == Transition.FINAL_LOG_REQUESTED and active_dc_id and sm.gear_label and sm.direction:
-                    _send(socket, LiveDcUpdate(
-                        dc_id=active_dc_id,
-                        test_run_id=active_test_run_id or active_dc_id,
-                        station_id=STATION_ID,
-                        gear_label=sm.gear_label,
-                        direction=sm.direction,
-                        stamp="PASS",
-                        fail_reason_codes=[],
-                    ))
-                elif t == Transition.RUN_STOPPED and active_test_run_id:
-                    _send(socket, LiveTestRunUpdate(
-                        test_run_id=active_test_run_id, station_id=STATION_ID,
-                        status="COMPLETED", overall_result="PASS",
-                    ))
-                    active_test_run_id = None
-                    active_dc_id = None
+    try:
+        while True:
+            # Non-blocking PLC poll first.
+            events = dict(poller.poll(timeout=0))
+            if plc_sub in events:
+                update = PlcStateUpdate.model_validate_json(plc_sub.recv_string())
+                for t in sm.apply(update):
+                    if t == Transition.RUN_STARTED:
+                        active_test_run_id = str(uuid.uuid4())
+                        active_dc_id = str(uuid.uuid4())
+                        chunk_index = 0
+                        _send(socket, LiveTestRunUpdate(
+                            test_run_id=active_test_run_id, station_id=STATION_ID, status="RUNNING",
+                        ))
+                    elif t == Transition.FINAL_LOG_REQUESTED and active_dc_id and sm.gear_label and sm.direction:
+                        _send(socket, LiveDcUpdate(
+                            dc_id=active_dc_id,
+                            test_run_id=active_test_run_id or active_dc_id,
+                            station_id=STATION_ID,
+                            gear_label=sm.gear_label,
+                            direction=sm.direction,
+                            stamp="PASS",
+                            fail_reason_codes=[],
+                        ))
+                    elif t == Transition.RUN_STOPPED and active_test_run_id:
+                        _send(socket, LiveTestRunUpdate(
+                            test_run_id=active_test_run_id, station_id=STATION_ID,
+                            status="COMPLETED", overall_result="PASS",
+                        ))
+                        active_test_run_id = None
+                        active_dc_id = None
 
-        # Always drain the DAQ buffer at the chunk cadence (samples the
-        # driver holds must be read regardless of log state, otherwise
-        # the buffer overflows). Discard when log is inactive.
-        raw = task.read(number_of_samples_per_channel=chunk_samples)
-        if sm.log_active and active_test_run_id and active_dc_id and sm.gear_label and sm.direction:
-            values_eu = scale_v_to_eu(raw, sensor_sensitivity_mv_per_eu, pregain_db)
-            values_list = values_eu.tolist()
-            t0 = chunk_index * chunk_samples / sample_rate_hz
-            time_s = (t0 + np.arange(chunk_samples) / sample_rate_hz).tolist()
-            rpm_slice = np.full(chunk_samples, 1500.0).tolist()  # placeholder; Phase G reads counter task
-            _send(socket, LiveSignalChunk(
-                test_run_id=active_test_run_id,
-                dc_id=active_dc_id,
-                station_id=STATION_ID,
-                gear_label=sm.gear_label,
-                direction=sm.direction,
-                channel_name=CHANNEL_NAME,
-                sample_rate_hz=sample_rate_hz,
-                chunk_index=chunk_index,
-                time_s=time_s,
-                values=values_list,
-                rpm=rpm_slice,
-                channels={CHANNEL_NAME: values_list},
-            ))
-            chunk_index += 1
+            # Always drain the DAQ buffer at the chunk cadence (samples the
+            # driver holds must be read regardless of log state, otherwise
+            # the buffer overflows). Discard when log is inactive.
+            raw = task.read(number_of_samples_per_channel=chunk_samples)
+            if sm.log_active and active_test_run_id and active_dc_id and sm.gear_label and sm.direction:
+                values_eu = scale_v_to_eu(raw, sensor_sensitivity_mv_per_eu, pregain_db)
+                values_list = values_eu.tolist()
+                t0 = chunk_index * chunk_samples / sample_rate_hz
+                time_s = (t0 + np.arange(chunk_samples) / sample_rate_hz).tolist()
+                rpm_slice = np.full(chunk_samples, 1500.0).tolist()  # placeholder; Phase G reads counter task
+                _send(socket, LiveSignalChunk(
+                    test_run_id=active_test_run_id,
+                    dc_id=active_dc_id,
+                    station_id=STATION_ID,
+                    gear_label=sm.gear_label,
+                    direction=sm.direction,
+                    channel_name=CHANNEL_NAME,
+                    sample_rate_hz=sample_rate_hz,
+                    chunk_index=chunk_index,
+                    time_s=time_s,
+                    values=values_list,
+                    rpm=rpm_slice,
+                    channels={CHANNEL_NAME: values_list},
+                ))
+                chunk_index += 1
 
+
+    finally:
+        # Phase O Bug 7: close the PLC SUB on any exit path.
+        try:
+            plc_sub.close(linger=0)
+        except Exception as exc:
+            print(f"live_daq: plc_sub.close error: {exc}", file=sys.stderr, flush=True)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Publish NI-DAQmx samples over ZMQ (drop-in for live_simulator.py)")
