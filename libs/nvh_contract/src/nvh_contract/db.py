@@ -198,6 +198,23 @@ class SummaryDataRow(Base):
     created_at = Column(String, nullable=False)
 
 
+class IngestContextRow(Base):
+    """Single-row table (usually just one live row per station) holding
+    the operator-entered identifiers the dashboard app forwards to the
+    NVH app via NI DataSocket (Phase K). Superseded by a fresh POST
+    each time the dashboard sends new values -- we don't accumulate
+    history here; that's the trial/summary tables' job."""
+
+    __tablename__ = "ingest_context"
+
+    station_id = Column(String, primary_key=True)
+    model_name = Column(String, nullable=False)
+    serial_no = Column(String, nullable=False)
+    serial_rpt = Column(String, nullable=False, default="1")
+    operator_name = Column(String, nullable=True)
+    received_at = Column(String, nullable=False)
+
+
 class CalibrationRow(Base):
     """One row per (model, channel) recording the sensor calibration
     state the operator entered on the Calibration screen -- matches the

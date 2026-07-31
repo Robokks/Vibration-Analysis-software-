@@ -15,6 +15,7 @@ from nvh_api_schemas.realtime import (
     LiveTestRunUpdate,
     PlcStateUpdate,
 )
+from nvh_api_schemas.dashboard import HeartbeatOut, IngestContextIn, IngestContextOut
 from nvh_api_schemas.summary import SummaryDataCreate, SummaryDataOut
 from nvh_api_schemas.report import (
     CodeResultReportOut,
@@ -70,6 +71,9 @@ __all__ = [
     "OrderSpectrumOut",
     "OrderTrackingOut",
     "SlippageOut",
+    "HeartbeatOut",
+    "IngestContextIn",
+    "IngestContextOut",
     "SummaryDataCreate",
     "SummaryDataOut",
     "SummaryReportOut",
