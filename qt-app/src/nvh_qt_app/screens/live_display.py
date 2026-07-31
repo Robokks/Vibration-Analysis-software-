@@ -486,6 +486,14 @@ class LiveDisplayScreen(QWidget):
         # Empty text -- the color IS the value, matching the real
         # LabVIEW screen's convention (green fill == PASS).
         item.setText("")
+        # Phase O Bug 2: reset the running RMS/peak max for this row
+        # AFTER painting the DC stamp. The just-completed run's max
+        # values stay visible until the next chunk arrives; the next
+        # run's chunks start from zero, not from the previous run's
+        # lifetime peak. Clearing here (rather than on RUN_STARTED for
+        # the next run) means there's no window where the cell shows
+        # stale data for the wrong run.
+        self._row_stats.pop((gear, direction), None)
 
     def _handle_signal_chunk(self, payload: dict[str, Any]) -> None:
         self._station_id = payload.get("station_id") or self._station_id

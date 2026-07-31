@@ -149,6 +149,42 @@ class LiveDisplayScreenTests:
         })
         assert screen._results_table.item(row, 2).text() == "0.500"
 
+    def test_row_stats_reset_on_new_dc(self, qapp):
+        # Phase O Bug 2: _row_stats used to latch to lifetime max because
+        # nothing ever cleared it. After a dc event closes one run, the
+        # next run must start from zero, not inherit the previous run's
+        # running peak.
+        screen, _api, live = _make_screen()
+        row = screen._row_index[("R", "RU")]
+
+        # Run 1: high peaks -> 0.5 RMS max shown.
+        live.emit_event({
+            "type": "signal_chunk", "test_run_id": "r1", "dc_id": "d1",
+            "station_id": "STATION-1", "gear_label": "R", "direction": "RU",
+            "channel_name": "vib_a", "sample_rate_hz": 5000.0,
+            "chunk_index": 0, "time_s": list(range(64)),
+            "values": [0.5 * ((-1) ** i) for i in range(64)], "rpm": [1000.0] * 64,
+        })
+        assert screen._results_table.item(row, 2).text() == "0.500"
+
+        # DC arrives (PASS) -- closes the run and must reset the stats.
+        live.emit_event({
+            "type": "dc", "dc_id": "d1", "test_run_id": "r1",
+            "station_id": "STATION-1", "gear_label": "R", "direction": "RU",
+            "stamp": "PASS", "fail_reason_codes": [],
+        })
+
+        # Run 2: much lower peaks. The cell must show the new run's RMS
+        # (0.100), NOT the previous run's max (0.500).
+        live.emit_event({
+            "type": "signal_chunk", "test_run_id": "r2", "dc_id": "d2",
+            "station_id": "STATION-1", "gear_label": "R", "direction": "RU",
+            "channel_name": "vib_a", "sample_rate_hz": 5000.0,
+            "chunk_index": 0, "time_s": list(range(64)),
+            "values": [0.1] * 64, "rpm": [1000.0] * 64,
+        })
+        assert screen._results_table.item(row, 2).text() == "0.100"
+
     def test_running_test_run_clears_previous_traces(self, qapp):
         screen, _api, live = _make_screen()
         live.emit_event({
