@@ -103,6 +103,9 @@ def _producer_specs() -> dict[str, ServiceSpec]:
 PLC_SOURCE_SIM = "plc_sim"
 PLC_SOURCE_REAL = "plc_real"
 
+DASH_SOURCE_SIM = "dash_sim"
+DASH_SOURCE_REAL = "dash_ds"
+
 
 def _plc_source_specs() -> dict[str, ServiceSpec]:
     return {
@@ -123,16 +126,28 @@ def _plc_source_specs() -> dict[str, ServiceSpec]:
     }
 
 
-def _build_service_specs() -> list[ServiceSpec]:
-    npm = shutil.which("npm") or "npm"
-    return [
-        ServiceSpec(
-            key="dashboard",
-            name="Dashboard Bridge (NI DataSocket)",
-            description="Windows-only. Bridges dashboard context in + heartbeat out (Phase K).",
+def _dashboard_source_specs() -> dict[str, ServiceSpec]:
+    return {
+        DASH_SOURCE_SIM: ServiceSpec(
+            key=DASH_SOURCE_SIM,
+            name="Dashboard — Simulator",
+            description="Scripted dashboard-context POSTs (no NI DataSocket needed)",
+            program=sys.executable,
+            args=[str(REPO_ROOT / "web-backend/scripts/dashboard_simulator.py")],
+        ),
+        DASH_SOURCE_REAL: ServiceSpec(
+            key=DASH_SOURCE_REAL,
+            name="Dashboard — NI DataSocket",
+            description="Windows only. Bridges dashboard context in + heartbeat out via pywin32 COM.",
             program=sys.executable,
             args=[str(REPO_ROOT / "web-backend/scripts/dashboard_bridge.py")],
         ),
+    }
+
+
+def _build_service_specs() -> list[ServiceSpec]:
+    npm = shutil.which("npm") or "npm"
+    return [
         ServiceSpec(
             key="backend",
             name="FastAPI Backend",
@@ -623,6 +638,112 @@ class PlcSourceRow(ProcessRow):
         self.findChild(QFrame, "SourceRing").setStyleSheet(style)
 
 
+class DashboardSourceRow(ProcessRow):
+    """Dashboard producer row -- Simulator / NI DataSocket pill toggle.
+    Same mutual-exclusion contract as PlcSourceRow: both write to the
+    same /dashboard/context endpoint, so only one should run at a time.
+    """
+
+    def __init__(self, palette: dict[str, str], initial: str = DASH_SOURCE_SIM) -> None:
+        self._specs = _dashboard_source_specs()
+        super().__init__(self._specs[initial], palette)
+        self._selected = initial
+
+        self.name_lbl.setText("Dashboard")
+
+        selector_wrapper = QFrame()
+        selector_wrapper.setObjectName("SourceRing")
+        wrap_layout = QHBoxLayout(selector_wrapper)
+        wrap_layout.setContentsMargins(4, 3, 4, 3)
+        wrap_layout.setSpacing(0)
+
+        self._source_group = QButtonGroup(self)
+        self._source_group.setExclusive(True)
+
+        self.sim_btn = QPushButton("Simulator")
+        self.sim_btn.setCheckable(True)
+        self.sim_btn.setObjectName("SourcePill")
+        self.sim_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._source_group.addButton(self.sim_btn)
+        wrap_layout.addWidget(self.sim_btn)
+
+        self.datasocket_btn = QPushButton("NI DataSocket")
+        self.datasocket_btn.setCheckable(True)
+        self.datasocket_btn.setObjectName("SourcePill")
+        self.datasocket_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._source_group.addButton(self.datasocket_btn)
+        wrap_layout.addWidget(self.datasocket_btn)
+
+        if initial == DASH_SOURCE_REAL:
+            self.datasocket_btn.setChecked(True)
+        else:
+            self.sim_btn.setChecked(True)
+
+        self.sim_btn.clicked.connect(lambda: self._select(DASH_SOURCE_SIM))
+        self.datasocket_btn.clicked.connect(lambda: self._select(DASH_SOURCE_REAL))
+
+        header_layout = self.layout().itemAt(0).layout()
+        header_layout.insertWidget(2, selector_wrapper)
+        self._apply_source_ring_style()
+
+    def _select(self, source: str) -> None:
+        if self._status in (_STATUS_RUNNING, _STATUS_STARTING):
+            self._apply_source_ring_style()
+            return
+        if source == self._selected:
+            return
+        self._selected = source
+        self.spec = self._specs[source]
+        self.desc_lbl.setText(self.spec.description)
+        self._append_log(
+            f"--- source switched to {source.upper()} ({self.spec.args[0].split('/')[-1]}) ---"
+        )
+        self._apply_source_ring_style()
+
+    def selected_source(self) -> str:
+        return self._selected
+
+    def _set_status(self, status: str) -> None:  # noqa: N802 (Qt override)
+        super()._set_status(status)
+        running = status in (_STATUS_RUNNING, _STATUS_STARTING)
+        self.sim_btn.setEnabled(not running)
+        self.datasocket_btn.setEnabled(not running)
+        self._apply_source_ring_style()
+
+    def apply_palette(self, palette: dict[str, str]) -> None:
+        super().apply_palette(palette)
+        self._apply_source_ring_style()
+
+    def _apply_source_ring_style(self) -> None:
+        panel = self._palette["panel"]
+        secondary = self._palette["secondaryText"]
+        accent = self._palette["accentSecondary"]
+        background = self._palette["background"]
+        style = f"""
+            QFrame#SourceRing {{
+                background-color: {background};
+                border: 1px solid {panel};
+                border-radius: 14px;
+            }}
+            QPushButton#SourcePill {{
+                background-color: transparent;
+                color: {secondary};
+                border: none;
+                padding: 4px 14px;
+                border-radius: 12px;
+                font-weight: 600;
+            }}
+            QPushButton#SourcePill:checked {{
+                background-color: {accent};
+                color: {background};
+            }}
+            QPushButton#SourcePill:disabled {{
+                color: {secondary};
+            }}
+        """
+        self.findChild(QFrame, "SourceRing").setStyleSheet(style)
+
+
 class OneShotBar(QFrame):
     """Top row of one-click actions: seed data, analysis demo, open web UI."""
 
@@ -763,6 +884,12 @@ class LauncherWindow(QMainWindow):
         self.plc_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._rows.append(self.plc_row)
         outer.addWidget(self.plc_row)
+
+        # Dashboard row, with its Simulator / NI DataSocket ring.
+        self.dashboard_row = DashboardSourceRow(palette, initial=DASH_SOURCE_SIM)
+        self.dashboard_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._rows.append(self.dashboard_row)
+        outer.addWidget(self.dashboard_row)
 
         for spec in _build_service_specs():
             row = ProcessRow(spec, palette)

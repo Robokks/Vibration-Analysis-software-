@@ -1,4 +1,7 @@
 from nvh_qt_app.launcher import (
+    DASH_SOURCE_REAL,
+    DASH_SOURCE_SIM,
+    DashboardSourceRow,
     LauncherWindow,
     OneShotBar,
     PLC_SOURCE_REAL,
@@ -9,6 +12,7 @@ from nvh_qt_app.launcher import (
     SOURCE_DAQ,
     SOURCE_SIM,
     _build_service_specs,
+    _dashboard_source_specs,
     _plc_source_specs,
     _producer_specs,
     _STATUS_CRASHED,
@@ -25,11 +29,13 @@ class LauncherWindowTests:
         window = LauncherWindow(theme)
 
         # Row 0: ProducerRow (Sim / NI-DAQmx), Row 1: PlcSourceRow
-        # (Sim / S7). Then dashboard, backend, web, qt.
+        # (Sim / S7), Row 2: DashboardSourceRow (Sim / DataSocket).
+        # Then backend, web, qt.
         assert len(window._rows) == 6
         assert isinstance(window._rows[0], ProducerRow)
         assert isinstance(window._rows[1], PlcSourceRow)
-        assert [r.spec.key for r in window._rows[2:]] == ["dashboard", "backend", "web", "qt"]
+        assert isinstance(window._rows[2], DashboardSourceRow)
+        assert [r.spec.key for r in window._rows[3:]] == ["backend", "web", "qt"]
 
         window.close()
 
@@ -167,6 +173,46 @@ class PlcSourceRowTests:
         row._set_status(_STATUS_RUNNING)
         assert not row.sim_btn.isEnabled()
         assert not row.real_btn.isEnabled()
+
+
+class DashboardSourceSpecTests:
+    def test_both_dashboard_sources_defined(self):
+        specs = _dashboard_source_specs()
+        assert set(specs.keys()) == {DASH_SOURCE_SIM, DASH_SOURCE_REAL}
+        assert "dashboard_simulator.py" in specs[DASH_SOURCE_SIM].args[0]
+        assert "dashboard_bridge.py" in specs[DASH_SOURCE_REAL].args[0]
+
+
+class DashboardSourceRowTests:
+    def _make(self, initial=DASH_SOURCE_SIM):
+        palette = load_tokens()["color"]["palettes"][PALETTE_DARK]
+        return DashboardSourceRow(palette, initial=initial)
+
+    def test_defaults_to_simulator(self, qapp):
+        row = self._make()
+        assert row.selected_source() == DASH_SOURCE_SIM
+        assert row.sim_btn.isChecked()
+        assert not row.datasocket_btn.isChecked()
+
+    def test_switch_to_datasocket_updates_spec(self, qapp):
+        row = self._make()
+        row._select(DASH_SOURCE_REAL)
+        assert row.selected_source() == DASH_SOURCE_REAL
+        assert "dashboard_bridge.py" in row.spec.args[0]
+
+    def test_pills_disabled_while_running(self, qapp):
+        row = self._make()
+        assert row.sim_btn.isEnabled()
+        assert row.datasocket_btn.isEnabled()
+        row._set_status(_STATUS_RUNNING)
+        assert not row.sim_btn.isEnabled()
+        assert not row.datasocket_btn.isEnabled()
+
+    def test_select_is_a_no_op_while_running(self, qapp):
+        row = self._make()
+        row._set_status(_STATUS_RUNNING)
+        row._select(DASH_SOURCE_REAL)
+        assert row.selected_source() == DASH_SOURCE_SIM
 
 
 class ProcessRowTests:
