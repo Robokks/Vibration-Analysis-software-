@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -204,6 +205,19 @@ class SummaryDataRow(Base):
     stamp = Column(String, nullable=False, default="PASS")
     fail_reason_codes_json = Column(String, nullable=False, default="[]")
     created_at = Column(String, nullable=False)
+
+    # Phase O Bug 9: producer's fire-and-forget POST /summaries can
+    # retry on transient backend blips. Without a uniqueness key beyond
+    # `summary_id` (a fresh uuid4 each call), each retry produced a
+    # duplicate row. The natural key is (test_run_id, dc_id, gear_id,
+    # nvh_id) -- a rerun of the same segment is a distinct row (new
+    # trial_no lives in the raw-file path, not the DB).
+    __table_args__ = (
+        UniqueConstraint(
+            "test_run_id", "dc_id", "gear_id", "nvh_id",
+            name="uq_summary_data_natural_key",
+        ),
+    )
 
 
 class IngestContextRow(Base):

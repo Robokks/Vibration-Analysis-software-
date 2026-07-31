@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
 from nvh_api_schemas.summary import SummaryDataCreate, SummaryDataOut
 from nvh_contract.db import SummaryDataRow
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from nvh_web_backend.db import get_session
@@ -59,7 +60,26 @@ def create_summary(body: SummaryDataCreate, session: Session = Depends(get_sessi
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     session.add(row)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Phase O Bug 9: producer's fire-and-forget POST can retry on a
+        # transient backend blip. UNIQUE (test_run_id, dc_id, gear_id,
+        # nvh_id) on SummaryDataRow makes the second POST a no-op:
+        # roll back the doomed insert, look up the existing row, and
+        # return it. The producer's contract is idempotent.
+        session.rollback()
+        existing = (
+            session.query(SummaryDataRow)
+            .filter_by(
+                test_run_id=body.test_run_id,
+                dc_id=body.dc_id,
+                gear_id=body.gear_id,
+                nvh_id=body.nvh_id,
+            )
+            .one()
+        )
+        return _row_to_out(existing)
     session.refresh(row)
     return _row_to_out(row)
 

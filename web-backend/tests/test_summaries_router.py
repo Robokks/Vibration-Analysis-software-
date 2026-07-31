@@ -50,6 +50,33 @@ class SummariesRouterTests:
         payloads = response.json()
         assert all(p["model_id"] == "MODEL-A" for p in payloads)
 
+    def test_duplicate_post_is_idempotent(self, client):
+        # Phase O Bug 9: two identical POSTs (transient network retry
+        # scenario) must yield exactly one row + a 200 on the second,
+        # not a second row with a fresh uuid.
+        body = {
+            "test_run_id": "dup-run", "dc_id": "dup-dc",
+            "model_id": "MODEL-A", "serial_no": "SN-DUP", "serial_rpt": "1",
+            "gear_id": 1, "nvh_id": 0,
+            "rms_avg": 0.5,
+        }
+        first = client.post("/summaries", json=body)
+        second = client.post("/summaries", json=body)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        # Same summary_id both times -- the second call returned the
+        # existing row rather than minting a new one.
+        assert first.json()["summary_id"] == second.json()["summary_id"]
+
+        # List confirms only ONE row for this (test_run_id, dc_id, gear, nvh).
+        listed = client.get("/summaries").json()
+        matching = [
+            r for r in listed
+            if r["test_run_id"] == "dup-run" and r["dc_id"] == "dup-dc"
+            and r["gear_id"] == 1 and r["nvh_id"] == 0
+        ]
+        assert len(matching) == 1
+
     def test_serial_rpt_accepts_non_numeric_string(self, client):
         # Phase O Bug 5: serial_rpt used to be Integer/int, which broke
         # legitimate operator inputs like "R2" from the dashboard side
