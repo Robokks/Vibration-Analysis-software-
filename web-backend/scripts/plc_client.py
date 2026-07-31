@@ -86,19 +86,47 @@ def main() -> None:
     socket.bind(args.pub_url)
     print(f"plc_client: PUB bound to {args.pub_url}", flush=True)
 
+    # Phase O Bug 8: put connect() inside try so a failed initial connect
+    # still runs the finally block (which closes the PUB socket + ctx),
+    # not just db_read/loop exceptions. Also treat db_read errors as
+    # reconnect signals rather than fatal -- transient PLC dropouts are
+    # normal in an industrial network and shouldn't kill the producer.
     client = snap7.client.Client()
-    client.connect(args.plc_ip, args.rack, args.slot)
-    print(
-        f"plc_client: connected to {args.plc_ip}:{args.rack}/{args.slot}, "
-        f"polling DB{args.db_number} @ {args.poll_hz:.1f} Hz",
-        flush=True,
-    )
-
     period_s = 1.0 / max(0.1, args.poll_hz)
     last_json: str | None = None
+
+    def _connect() -> bool:
+        try:
+            client.connect(args.plc_ip, args.rack, args.slot)
+            print(
+                f"plc_client: connected to {args.plc_ip}:{args.rack}/{args.slot}, "
+                f"polling DB{args.db_number} @ {args.poll_hz:.1f} Hz",
+                flush=True,
+            )
+            return True
+        except Exception as exc:  # snap7 raises snap7.exceptions.Snap7Exception
+            print(f"plc_client: connect failed: {exc}", file=sys.stderr, flush=True)
+            return False
+
     try:
+        # Initial connect. If it fails, don't spin -- exit cleanly with
+        # exit code 2 so the launcher's row shows a crashed status and
+        # the operator sees what happened.
+        if not _connect():
+            raise SystemExit(2)
         while True:
-            buf = bytes(client.db_read(args.db_number, args.start_byte, args.length))
+            try:
+                buf = bytes(client.db_read(args.db_number, args.start_byte, args.length))
+            except Exception as exc:  # noqa: BLE001
+                print(f"plc_client: db_read failed ({exc}); attempting reconnect", file=sys.stderr, flush=True)
+                try:
+                    client.disconnect()
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(1.0)
+                if not _connect():
+                    time.sleep(2.0)  # back off and retry on next iteration
+                continue
             event = _decode_db(buf)
             payload = event.model_dump_json()
             # Only publish on change -- reduces WebSocket traffic and
@@ -116,9 +144,20 @@ def main() -> None:
     except KeyboardInterrupt:
         print("plc_client: shutting down", flush=True)
     finally:
-        client.disconnect()
-        socket.close(linger=0)
-        ctx.term()
+        # Best-effort cleanup; each step guarded so one failure doesn't
+        # skip the rest.
+        try:
+            client.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            socket.close(linger=0)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            ctx.term()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 if __name__ == "__main__":
