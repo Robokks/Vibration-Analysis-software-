@@ -140,6 +140,10 @@ class LiveDisplayScreen(QWidget):
         # (gear_label, direction) -> stamp last painted, so a palette
         # flip can re-color Result cells with the fresh pass/alarm hex.
         self._row_stamp: dict[tuple[str, str], str] = {}
+        # (gear_label, direction) -> running (rms_max, peak_max) live
+        # values, updated per signal_chunk. Cleared when a new dc for
+        # that pair arrives (a fresh run starts).
+        self._row_stats: dict[tuple[str, str], tuple[float, float]] = {}
         # Rolling rpm buffer that mirrors the raw-trace sample buffer,
         # kept in lockstep so order tracking has an aligned rpm value
         # for each sample. Bounded at _TRACE_MAX_SAMPLES.
@@ -523,6 +527,35 @@ class LiveDisplayScreen(QWidget):
         if self._chunk_counter % 4 == 0:
             self._refresh_spectrogram(sample_rate_hz)
             self._refresh_order_analysis()
+
+        # Update the live RMS-max / PK-max cells in the results grid
+        # for the (gear_label, direction) this chunk belongs to.
+        gear = payload.get("gear_label")
+        direction = payload.get("direction")
+        if gear and direction and values:
+            self._update_row_live_stats(gear, direction, values)
+
+    def _update_row_live_stats(self, gear: str, direction: str, values: list[float]) -> None:
+        arr = np.asarray(values, dtype=np.float64)
+        rms = float(np.sqrt(np.mean(arr * arr))) if arr.size else 0.0
+        peak = float(np.max(np.abs(arr))) if arr.size else 0.0
+        prev_rms, prev_peak = self._row_stats.get((gear, direction), (0.0, 0.0))
+        rms_max = max(prev_rms, rms)
+        peak_max = max(prev_peak, peak)
+        self._row_stats[(gear, direction)] = (rms_max, peak_max)
+
+        r = self._row_index.get((gear, direction))
+        if r is None:
+            return
+        # Columns: 0=gear id, 1=result, 2=RMS max, 3=PK max, ...
+        rms_item = self._results_table.item(r, 2) or QTableWidgetItem("")
+        rms_item.setText(f"{rms_max:.3f}")
+        self._results_table.setItem(r, 2, rms_item)
+        # PK max is in dB m/s^2 per column header; approximate as 20*log10.
+        peak_db = 20.0 * np.log10(max(peak_max, 1e-12))
+        peak_item = self._results_table.item(r, 3) or QTableWidgetItem("")
+        peak_item.setText(f"{peak_db:.2f}")
+        self._results_table.setItem(r, 3, peak_item)
 
     def _refresh_spectrogram(self, sample_rate_hz: float | None) -> None:
         """Compute STFT + octave bands from the current raw-signal buffer

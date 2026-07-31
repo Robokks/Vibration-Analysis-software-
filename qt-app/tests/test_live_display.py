@@ -125,6 +125,30 @@ class LiveDisplayScreenTests:
         assert abs(screen._computed_plot.series_config("PEAK").buffer[0] - 0.5) < 1e-6
         assert abs(screen._computed_plot.series_config("SPEED").buffer[0] - 1000.0) < 1e-6
 
+    def test_signal_chunk_populates_live_rms_and_peak_cells(self, qapp):
+        screen, _api, live = _make_screen()
+        values = [0.5 * ((-1) ** i) for i in range(64)]  # RMS = 0.5, peak = 0.5
+        live.emit_event({
+            "type": "signal_chunk", "test_run_id": "r", "dc_id": "d",
+            "station_id": "STATION-1", "gear_label": "R", "direction": "RU",
+            "channel_name": "vib_a", "sample_rate_hz": 5000.0,
+            "chunk_index": 0, "time_s": list(range(64)),
+            "values": values, "rpm": [1000.0] * 64,
+        })
+        # The (R, RU) row should now show 0.500 in the RMS max column.
+        row = screen._row_index[("R", "RU")]
+        assert screen._results_table.item(row, 2).text() == "0.500"
+        # Second chunk with smaller values should NOT lower the running max.
+        smaller = [0.1] * 64
+        live.emit_event({
+            "type": "signal_chunk", "test_run_id": "r", "dc_id": "d",
+            "station_id": "STATION-1", "gear_label": "R", "direction": "RU",
+            "channel_name": "vib_a", "sample_rate_hz": 5000.0,
+            "chunk_index": 1, "time_s": list(range(64)),
+            "values": smaller, "rpm": [1000.0] * 64,
+        })
+        assert screen._results_table.item(row, 2).text() == "0.500"
+
     def test_running_test_run_clears_previous_traces(self, qapp):
         screen, _api, live = _make_screen()
         live.emit_event({
