@@ -44,6 +44,7 @@ from nvh_api_schemas.realtime import (
     LiveTestRunUpdate,
     PlcStateUpdate,
 )
+from nvh_contract.calibration import scale_v_to_eu
 from nvh_contract.state import NvhStateMachine, Transition
 
 # Keep these in lockstep with live_simulator.py -- same virtual station,
@@ -141,7 +142,12 @@ def _resolve_tdms_path(raw: str) -> str:
     return raw.replace("{ts}", ts)
 
 
-def _run_plc_driven_daq(socket, task, sample_rate_hz, chunk_samples, plc_url: str) -> None:
+def _run_plc_driven_daq(
+    socket, task, sample_rate_hz, chunk_samples, plc_url: str,
+    *,
+    sensor_sensitivity_mv_per_eu: float = 1000.0,
+    pregain_db: float = 0.0,
+) -> None:
     """Interleaves a PLC SUB poll with continuous DAQ reads; only emits
     a chunk while state machine says log_active. Mirrors the pattern in
     live_simulator._run_plc_driven_mode but reads real hardware."""
@@ -195,7 +201,8 @@ def _run_plc_driven_daq(socket, task, sample_rate_hz, chunk_samples, plc_url: st
         # the buffer overflows). Discard when log is inactive.
         raw = task.read(number_of_samples_per_channel=chunk_samples)
         if sm.log_active and active_test_run_id and active_dc_id and sm.gear_label and sm.direction:
-            values = np.asarray(raw, dtype=np.float64)
+            values_eu = scale_v_to_eu(raw, sensor_sensitivity_mv_per_eu, pregain_db)
+            values_list = values_eu.tolist()
             t0 = chunk_index * chunk_samples / sample_rate_hz
             time_s = (t0 + np.arange(chunk_samples) / sample_rate_hz).tolist()
             rpm_slice = np.full(chunk_samples, 1500.0).tolist()  # placeholder; Phase G reads counter task
@@ -209,8 +216,9 @@ def _run_plc_driven_daq(socket, task, sample_rate_hz, chunk_samples, plc_url: st
                 sample_rate_hz=sample_rate_hz,
                 chunk_index=chunk_index,
                 time_s=time_s,
-                values=values.tolist(),
+                values=values_list,
                 rpm=rpm_slice,
+                channels={CHANNEL_NAME: values_list},
             ))
             chunk_index += 1
 
@@ -247,6 +255,18 @@ def main() -> None:
              "PLC-driven mode: continuously reads samples from the DAQ "
              "but only publishes chunks while the state machine's "
              "log_active is true.",
+    )
+    parser.add_argument(
+        "--sensitivity",
+        type=float,
+        default=float(os.environ.get("NVH_LIVE_SENSITIVITY_MV_PER_EU", "1000.0")),
+        help="Sensor sensitivity in mV per engineering unit "
+             "(default 1000.0 = identity V->EU; 100.0 for 100 mV/g accel).",
+    )
+    parser.add_argument(
+        "--pregain-db", type=float,
+        default=float(os.environ.get("NVH_LIVE_PREGAIN_DB", "0.0")),
+        help="Pre-amp gain in dB applied before the ADC (default 0 dB).",
     )
     args = parser.parse_args()
 
@@ -294,7 +314,11 @@ def main() -> None:
             )
 
             if args.plc_url:
-                _run_plc_driven_daq(socket, task, args.sample_rate, chunk_samples, args.plc_url)
+                _run_plc_driven_daq(
+                    socket, task, args.sample_rate, chunk_samples, args.plc_url,
+                    sensor_sensitivity_mv_per_eu=args.sensitivity,
+                    pregain_db=args.pregain_db,
+                )
             else:
                 while True:
                     _emit_run(socket, task, args.sample_rate, chunk_samples, n_chunks)

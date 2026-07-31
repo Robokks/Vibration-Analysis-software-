@@ -37,6 +37,7 @@ from nvh_api_schemas.realtime import (
     LiveTestRunUpdate,
     PlcStateUpdate,
 )
+from nvh_contract.calibration import scale_v_to_eu
 from nvh_contract.state import NvhStateMachine, Transition
 from nvh_simulator.faults import Fault
 from nvh_simulator.generators import generate_dc_record
@@ -192,7 +193,14 @@ def _synth_chunk(gear_label: str, chunk_index: int, sample_rate_hz: float, rng) 
     return time_s, values, rpm
 
 
-def _run_plc_driven_mode(socket: zmq.Socket, plc_url: str, tdms_writer) -> None:
+def _run_plc_driven_mode(
+    socket: zmq.Socket,
+    plc_url: str,
+    tdms_writer,
+    *,
+    sensor_sensitivity_mv_per_eu: float = 1000.0,
+    pregain_db: float = 0.0,
+) -> None:
     ctx = zmq.Context.instance()
     plc_sub = ctx.socket(zmq.SUB)
     plc_sub.connect(plc_url)
@@ -254,7 +262,10 @@ def _run_plc_driven_mode(socket: zmq.Socket, plc_url: str, tdms_writer) -> None:
         # Time-slice: emit a chunk if we're actively logging.
         if time.monotonic() >= next_chunk_at:
             if sm.log_active and active_test_run_id and active_dc_id and sm.gear_label and sm.direction:
-                time_s, values, rpm = _synth_chunk(sm.gear_label, chunk_index, SAMPLE_RATE_HZ, rng)
+                time_s, values_v, rpm = _synth_chunk(sm.gear_label, chunk_index, SAMPLE_RATE_HZ, rng)
+                # Calibration scaling raw V -> EU. Identity by default.
+                values_eu = scale_v_to_eu(values_v, sensor_sensitivity_mv_per_eu, pregain_db)
+                values_list = values_eu.tolist()
                 _send(socket, LiveSignalChunk(
                     test_run_id=active_test_run_id,
                     dc_id=active_dc_id,
@@ -265,11 +276,12 @@ def _run_plc_driven_mode(socket: zmq.Socket, plc_url: str, tdms_writer) -> None:
                     sample_rate_hz=SAMPLE_RATE_HZ,
                     chunk_index=chunk_index,
                     time_s=time_s.tolist(),
-                    values=values.tolist(),
+                    values=values_list,
                     rpm=rpm.tolist(),
+                    channels={CHANNEL_NAME: values_list},
                 ))
                 if tdms_writer is not None:
-                    _write_tdms_chunk(tdms_writer, values, rpm, SAMPLE_RATE_HZ, CHANNEL_NAME)
+                    _write_tdms_chunk(tdms_writer, values_eu, rpm, SAMPLE_RATE_HZ, CHANNEL_NAME)
                 chunk_index += 1
             next_chunk_at += CHUNK_PERIOD_S
 
@@ -293,6 +305,20 @@ def main() -> None:
         default=os.environ.get("NVH_LIVE_TDMS_PATH", ""),
         help="Optional TDMS output path (see requirements-daq.txt).",
     )
+    parser.add_argument(
+        "--sensitivity",
+        type=float,
+        default=float(os.environ.get("NVH_LIVE_SENSITIVITY_MV_PER_EU", "1000.0")),
+        help="Sensor sensitivity in mV per engineering unit "
+             "(default 1000.0 = identity V->EU scaling; "
+             "100.0 for a typical 100 mV/g accelerometer).",
+    )
+    parser.add_argument(
+        "--pregain-db",
+        type=float,
+        default=float(os.environ.get("NVH_LIVE_PREGAIN_DB", "0.0")),
+        help="Pre-amp gain applied before the ADC in dB (default 0 dB).",
+    )
     args = parser.parse_args()
 
     context = zmq.Context.instance()
@@ -304,7 +330,11 @@ def main() -> None:
 
     try:
         if args.plc_url:
-            _run_plc_driven_mode(socket, args.plc_url, tdms_writer)
+            _run_plc_driven_mode(
+                socket, args.plc_url, tdms_writer,
+                sensor_sensitivity_mv_per_eu=args.sensitivity,
+                pregain_db=args.pregain_db,
+            )
         else:
             _run_auto_mode(socket, tdms_writer)
     except KeyboardInterrupt:

@@ -485,7 +485,15 @@ class LiveDisplayScreen(QWidget):
 
     def _handle_signal_chunk(self, payload: dict[str, Any]) -> None:
         self._station_id = payload.get("station_id") or self._station_id
-        values = payload.get("values") or []
+        # Multi-channel: prefer the `channels` dict if present (Phase G+),
+        # falling back to the legacy top-level `values` for
+        # wire-compatibility with older producers.
+        channels = payload.get("channels") or {}
+        primary_channel = payload.get("channel_name") or "vib_a"
+        if channels and primary_channel in channels:
+            values = channels[primary_channel]
+        else:
+            values = payload.get("values") or []
         rpm = payload.get("rpm") or []
         sample_rate_hz = payload.get("sample_rate_hz")
         if not values:
