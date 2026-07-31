@@ -1,11 +1,15 @@
 from nvh_qt_app.launcher import (
     LauncherWindow,
     OneShotBar,
+    PLC_SOURCE_REAL,
+    PLC_SOURCE_SIM,
+    PlcSourceRow,
     ProcessRow,
     ProducerRow,
     SOURCE_DAQ,
     SOURCE_SIM,
     _build_service_specs,
+    _plc_source_specs,
     _producer_specs,
     _STATUS_CRASHED,
     _STATUS_IDLE,
@@ -20,10 +24,12 @@ class LauncherWindowTests:
         theme = ThemeManager(initial=PALETTE_DARK)
         window = LauncherWindow(theme)
 
-        # Row 0 is the shared Live Producer, then the three fixed services.
-        assert len(window._rows) == 4
+        # Row 0: ProducerRow (Sim / NI-DAQmx), Row 1: PlcSourceRow
+        # (Sim / S7). Then dashboard, backend, web, qt.
+        assert len(window._rows) == 6
         assert isinstance(window._rows[0], ProducerRow)
-        assert [r.spec.key for r in window._rows[1:]] == ["backend", "web", "qt"]
+        assert isinstance(window._rows[1], PlcSourceRow)
+        assert [r.spec.key for r in window._rows[2:]] == ["dashboard", "backend", "web", "qt"]
 
         window.close()
 
@@ -129,6 +135,38 @@ class ProducerSpecTests:
         assert set(specs.keys()) == {SOURCE_SIM, SOURCE_DAQ}
         assert "live_simulator.py" in specs[SOURCE_SIM].args[0]
         assert "live_daq.py" in specs[SOURCE_DAQ].args[0]
+
+
+class PlcSourceSpecTests:
+    def test_both_plc_sources_defined(self):
+        specs = _plc_source_specs()
+        assert set(specs.keys()) == {PLC_SOURCE_SIM, PLC_SOURCE_REAL}
+        assert "plc_simulator.py" in specs[PLC_SOURCE_SIM].args[0]
+        assert "plc_client.py" in specs[PLC_SOURCE_REAL].args[0]
+
+
+class PlcSourceRowTests:
+    def _make(self, initial=PLC_SOURCE_SIM):
+        palette = load_tokens()["color"]["palettes"][PALETTE_DARK]
+        return PlcSourceRow(palette, initial=initial)
+
+    def test_defaults_to_simulator(self, qapp):
+        row = self._make()
+        assert row.selected_source() == PLC_SOURCE_SIM
+        assert row.sim_btn.isChecked()
+        assert not row.real_btn.isChecked()
+
+    def test_switch_to_real_updates_spec(self, qapp):
+        row = self._make()
+        row._select(PLC_SOURCE_REAL)
+        assert row.selected_source() == PLC_SOURCE_REAL
+        assert "plc_client.py" in row.spec.args[0]
+
+    def test_pills_disabled_while_running(self, qapp):
+        row = self._make()
+        row._set_status(_STATUS_RUNNING)
+        assert not row.sim_btn.isEnabled()
+        assert not row.real_btn.isEnabled()
 
 
 class ProcessRowTests:

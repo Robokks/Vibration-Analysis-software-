@@ -100,9 +100,39 @@ def _producer_specs() -> dict[str, ServiceSpec]:
     }
 
 
+PLC_SOURCE_SIM = "plc_sim"
+PLC_SOURCE_REAL = "plc_real"
+
+
+def _plc_source_specs() -> dict[str, ServiceSpec]:
+    return {
+        PLC_SOURCE_SIM: ServiceSpec(
+            key=PLC_SOURCE_SIM,
+            name="PLC Source — Simulator",
+            description="Scripted PlcStateUpdate sequence on tcp://*:5556",
+            program=sys.executable,
+            args=[str(REPO_ROOT / "web-backend/scripts/plc_simulator.py")],
+        ),
+        PLC_SOURCE_REAL: ServiceSpec(
+            key=PLC_SOURCE_REAL,
+            name="PLC Source — Siemens S7",
+            description="Poll a real S7 PLC via python-snap7 (needs the driver)",
+            program=sys.executable,
+            args=[str(REPO_ROOT / "web-backend/scripts/plc_client.py")],
+        ),
+    }
+
+
 def _build_service_specs() -> list[ServiceSpec]:
     npm = shutil.which("npm") or "npm"
     return [
+        ServiceSpec(
+            key="dashboard",
+            name="Dashboard Bridge (NI DataSocket)",
+            description="Windows-only. Bridges dashboard context in + heartbeat out (Phase K).",
+            program=sys.executable,
+            args=[str(REPO_ROOT / "web-backend/scripts/dashboard_bridge.py")],
+        ),
         ServiceSpec(
             key="backend",
             name="FastAPI Backend",
@@ -487,6 +517,112 @@ class ProducerRow(ProcessRow):
         self.findChild(QFrame, "SourceRing").setStyleSheet(style)
 
 
+class PlcSourceRow(ProcessRow):
+    """PLC producer row -- Simulator / Siemens S7 pill toggle. Same
+    mutual-exclusion contract as ProducerRow (both PLC producers bind
+    the same ZMQ port). Simpler than ProducerRow: no TDMS/buffer
+    knobs -- PLC events are lightweight."""
+
+    def __init__(self, palette: dict[str, str], initial: str = PLC_SOURCE_SIM) -> None:
+        self._specs = _plc_source_specs()
+        super().__init__(self._specs[initial], palette)
+        self._selected = initial
+
+        self.name_lbl.setText("PLC Source")
+
+        selector_wrapper = QFrame()
+        selector_wrapper.setObjectName("SourceRing")
+        wrap_layout = QHBoxLayout(selector_wrapper)
+        wrap_layout.setContentsMargins(4, 3, 4, 3)
+        wrap_layout.setSpacing(0)
+
+        self._source_group = QButtonGroup(self)
+        self._source_group.setExclusive(True)
+
+        self.sim_btn = QPushButton("Simulator")
+        self.sim_btn.setCheckable(True)
+        self.sim_btn.setObjectName("SourcePill")
+        self.sim_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._source_group.addButton(self.sim_btn)
+        wrap_layout.addWidget(self.sim_btn)
+
+        self.real_btn = QPushButton("Siemens S7")
+        self.real_btn.setCheckable(True)
+        self.real_btn.setObjectName("SourcePill")
+        self.real_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._source_group.addButton(self.real_btn)
+        wrap_layout.addWidget(self.real_btn)
+
+        if initial == PLC_SOURCE_REAL:
+            self.real_btn.setChecked(True)
+        else:
+            self.sim_btn.setChecked(True)
+
+        self.sim_btn.clicked.connect(lambda: self._select(PLC_SOURCE_SIM))
+        self.real_btn.clicked.connect(lambda: self._select(PLC_SOURCE_REAL))
+
+        header_layout = self.layout().itemAt(0).layout()
+        header_layout.insertWidget(2, selector_wrapper)
+        self._apply_source_ring_style()
+
+    def _select(self, source: str) -> None:
+        if self._status in (_STATUS_RUNNING, _STATUS_STARTING):
+            self._apply_source_ring_style()
+            return
+        if source == self._selected:
+            return
+        self._selected = source
+        self.spec = self._specs[source]
+        self.desc_lbl.setText(self.spec.description)
+        self._append_log(
+            f"--- source switched to {source.upper()} ({self.spec.args[0].split('/')[-1]}) ---"
+        )
+        self._apply_source_ring_style()
+
+    def selected_source(self) -> str:
+        return self._selected
+
+    def _set_status(self, status: str) -> None:  # noqa: N802 (Qt override)
+        super()._set_status(status)
+        running = status in (_STATUS_RUNNING, _STATUS_STARTING)
+        self.sim_btn.setEnabled(not running)
+        self.real_btn.setEnabled(not running)
+        self._apply_source_ring_style()
+
+    def apply_palette(self, palette: dict[str, str]) -> None:
+        super().apply_palette(palette)
+        self._apply_source_ring_style()
+
+    def _apply_source_ring_style(self) -> None:
+        panel = self._palette["panel"]
+        secondary = self._palette["secondaryText"]
+        accent = self._palette["accentSecondary"]
+        background = self._palette["background"]
+        style = f"""
+            QFrame#SourceRing {{
+                background-color: {background};
+                border: 1px solid {panel};
+                border-radius: 14px;
+            }}
+            QPushButton#SourcePill {{
+                background-color: transparent;
+                color: {secondary};
+                border: none;
+                padding: 4px 14px;
+                border-radius: 12px;
+                font-weight: 600;
+            }}
+            QPushButton#SourcePill:checked {{
+                background-color: {accent};
+                color: {background};
+            }}
+            QPushButton#SourcePill:disabled {{
+                color: {secondary};
+            }}
+        """
+        self.findChild(QFrame, "SourceRing").setStyleSheet(style)
+
+
 class OneShotBar(QFrame):
     """Top row of one-click actions: seed data, analysis demo, open web UI."""
 
@@ -578,7 +714,7 @@ class LauncherWindow(QMainWindow):
         self._theme = theme
 
         self.setWindowTitle("NVH Launcher")
-        self.setMinimumSize(940, 940)
+        self.setMinimumSize(940, 1100)
         self.setWindowIcon(_window_icon())
 
         central = QWidget()
@@ -621,6 +757,12 @@ class LauncherWindow(QMainWindow):
         self.producer_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._rows.append(self.producer_row)
         outer.addWidget(self.producer_row)
+
+        # PLC Source row, with its Simulator / Siemens S7 ring.
+        self.plc_row = PlcSourceRow(palette, initial=PLC_SOURCE_SIM)
+        self.plc_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._rows.append(self.plc_row)
+        outer.addWidget(self.plc_row)
 
         for spec in _build_service_specs():
             row = ProcessRow(spec, palette)
