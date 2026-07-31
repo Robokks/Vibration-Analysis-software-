@@ -20,6 +20,12 @@ from pathlib import Path
 import pytest
 import zmq
 
+try:
+    from nptdms import TdmsFile
+    NPTDMS_AVAILABLE = True
+except ImportError:
+    NPTDMS_AVAILABLE = False
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LIVE_SIM = REPO_ROOT / "web-backend" / "scripts" / "live_simulator.py"
 PLC_SIM = REPO_ROOT / "web-backend" / "scripts" / "plc_simulator.py"
@@ -80,6 +86,48 @@ class PlcDrivenLiveSimulatorTests:
         assert "test_run" in types_seen, f"missing test_run; saw {types_seen}"
         assert "signal_chunk" in types_seen, f"missing signal_chunk; saw {types_seen}"
         assert "dc" in types_seen, f"missing dc; saw {types_seen}"
+
+
+@pytest.mark.skipif(not NPTDMS_AVAILABLE, reason="nptdms not installed")
+class TdmsRolloverTests:
+    def test_transitions_create_nested_tdms_files(self, tmp_path):
+        signal_url = "tcp://127.0.0.1:15573"
+        plc_url = "tcp://127.0.0.1:15574"
+        raw_dir = tmp_path / "raw"
+
+        env = {
+            "NVH_LIVE_PUB_URL": signal_url,
+            "NVH_PLC_PUB_URL": plc_url,
+            "NVH_RAW_DIR": str(raw_dir),
+            "NVH_MODEL_ID": "MODEL-A",
+            "NVH_SERIAL_NO": "SN-TEST",
+            "NVH_SERIAL_RPT": "1",
+        }
+        plc = _spawn(PLC_SIM, {"NVH_PLC_PUB_URL": plc_url, "NVH_PLC_SPEED": "0.2"})
+        sim = _spawn(LIVE_SIM, env)
+
+        try:
+            # Let the sequence RunUp -> STYD -> RD -> final-trigger fire.
+            time.sleep(4.0)
+        finally:
+            sim.terminate()
+            plc.terminate()
+            sim.wait(timeout=5)
+            plc.wait(timeout=5)
+
+        # Expect at least one file per gear_id/nvh_id segment that ran
+        # (nvh_id -1 = no-log, so 3 log-segments in the scripted seq:
+        # nvh_id 0, 1, 3 -- gear_id stays at 1 = R).
+        tdms_files = list(raw_dir.rglob("*.tdms"))
+        assert len(tdms_files) >= 3, f"expected >=3 rollover files, got {tdms_files}"
+
+        # Check the path layout matches paths.raw_tdms_path(): the
+        # filename shape is `SN-TEST_{gear_id}_{nvh_id}.tdms`.
+        names = {p.name for p in tdms_files}
+        assert "SN-TEST_1_0.tdms" in names, f"missing gear1/nvh0 file; got {names}"
+        # Verify one file has data.
+        tdms = TdmsFile.read(str(tdms_files[0]))
+        assert tdms["acquisition"]["vib_a"].data.size > 0
 
 
 @pytest.mark.parametrize("no_plc_env", [{"NVH_PLC_PUB_URL": ""}])

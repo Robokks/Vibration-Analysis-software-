@@ -38,6 +38,7 @@ from nvh_api_schemas.realtime import (
     PlcStateUpdate,
 )
 from nvh_contract.calibration import scale_v_to_eu
+from nvh_contract.paths import raw_tdms_path
 from nvh_contract.state import NvhStateMachine, Transition
 from nvh_simulator.faults import Fault
 from nvh_simulator.generators import generate_dc_record
@@ -193,6 +194,35 @@ def _synth_chunk(gear_label: str, chunk_index: int, sample_rate_hz: float, rng) 
     return time_s, values, rpm
 
 
+def _open_rollover_writer(base_dir: str | None, trial_no: int, gear_id: int, nvh_id: int, model_id: str, serial_no: str, serial_rpt: int):
+    """Open a per-(gear_id, nvh_id) TDMS file under `base_dir` using the
+    nested layout, or None if base_dir isn't configured OR the
+    (gear_id, nvh_id) says "don't log" (either sentinel < 0)."""
+    if not base_dir:
+        return None
+    if gear_id < 0 or nvh_id < 0:
+        return None
+    try:
+        from nptdms import TdmsWriter  # noqa: WPS433
+    except ImportError:
+        print(
+            "live_simulator: TDMS rollover requested but `nptdms` isn't installed. "
+            "Install with `pip install -r requirements-daq.txt` to enable per-transition logging.",
+            file=sys.stderr, flush=True,
+        )
+        return None
+    path = raw_tdms_path(
+        base_dir=base_dir, model_id=model_id, serial_no=serial_no,
+        serial_rpt=serial_rpt, trial_no=trial_no,
+        gear_id=gear_id, nvh_id=nvh_id,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    writer = TdmsWriter(str(path))
+    writer.open()
+    print(f"live_simulator: TDMS rollover -> {path}", flush=True)
+    return writer
+
+
 def _run_plc_driven_mode(
     socket: zmq.Socket,
     plc_url: str,
@@ -200,6 +230,10 @@ def _run_plc_driven_mode(
     *,
     sensor_sensitivity_mv_per_eu: float = 1000.0,
     pregain_db: float = 0.0,
+    rollover_base_dir: str | None = None,
+    model_id: str = MODEL_ID,
+    serial_no: str = "SN-DEMO",
+    serial_rpt: int = 1,
 ) -> None:
     ctx = zmq.Context.instance()
     plc_sub = ctx.socket(zmq.SUB)
@@ -216,6 +250,24 @@ def _run_plc_driven_mode(
     active_dc_id: str | None = None
     chunk_index = 0
     next_chunk_at = time.monotonic()
+
+    # Per-(gear_id, nvh_id) rollover writer -- opens on transition,
+    # closes when a new one takes over. `tdms_writer` (the legacy
+    # single-file --tdms-path writer) still receives every chunk when
+    # rollover_base_dir is None.
+    rollover_writer = None
+    rollover_key: tuple[int, int] | None = None
+
+    def _switch_rollover_writer(gear_id: int, nvh_id: int) -> None:
+        nonlocal rollover_writer, rollover_key
+        if rollover_writer is not None:
+            rollover_writer.close()
+            rollover_writer = None
+        rollover_key = (gear_id, nvh_id)
+        rollover_writer = _open_rollover_writer(
+            rollover_base_dir, sm.trial_no, gear_id, nvh_id,
+            model_id, serial_no, serial_rpt,
+        )
 
     while True:
         # Non-blocking-ish poll: wait until it's time for the next chunk,
@@ -236,7 +288,10 @@ def _run_plc_driven_mode(
                     _send(socket, LiveTestRunUpdate(
                         test_run_id=active_test_run_id, station_id=STATION_ID, status="RUNNING",
                     ))
-                    print(f"live_simulator: RUN_STARTED test_run_id={active_test_run_id[:8]}", flush=True)
+                    _switch_rollover_writer(sm.gear_id, sm.nvh_id)
+                    print(f"live_simulator: RUN_STARTED test_run_id={active_test_run_id[:8]} trial={sm.trial_no}", flush=True)
+                elif t in (Transition.GEAR_CHANGED, Transition.NVH_ID_CHANGED):
+                    _switch_rollover_writer(sm.gear_id, sm.nvh_id)
                 elif t == Transition.FINAL_LOG_REQUESTED:
                     if active_dc_id and sm.gear_label and sm.direction:
                         _send(socket, LiveDcUpdate(
@@ -258,6 +313,10 @@ def _run_plc_driven_mode(
                         print(f"live_simulator: RUN_STOPPED test_run_id={active_test_run_id[:8]}", flush=True)
                     active_test_run_id = None
                     active_dc_id = None
+                    if rollover_writer is not None:
+                        rollover_writer.close()
+                        rollover_writer = None
+                        rollover_key = None
 
         # Time-slice: emit a chunk if we're actively logging.
         if time.monotonic() >= next_chunk_at:
@@ -282,6 +341,8 @@ def _run_plc_driven_mode(
                 ))
                 if tdms_writer is not None:
                     _write_tdms_chunk(tdms_writer, values_eu, rpm, SAMPLE_RATE_HZ, CHANNEL_NAME)
+                if rollover_writer is not None:
+                    _write_tdms_chunk(rollover_writer, values_eu, rpm, SAMPLE_RATE_HZ, CHANNEL_NAME)
                 chunk_index += 1
             next_chunk_at += CHUNK_PERIOD_S
 
@@ -319,6 +380,21 @@ def main() -> None:
         default=float(os.environ.get("NVH_LIVE_PREGAIN_DB", "0.0")),
         help="Pre-amp gain applied before the ADC in dB (default 0 dB).",
     )
+    parser.add_argument(
+        "--raw-dir",
+        default=os.environ.get("NVH_RAW_DIR", ""),
+        help="If set, PLC-driven mode opens a new TDMS file per "
+             "(gear_id, nvh_id) transition under this base directory "
+             "(nested as YYYY/MM/DD/TrialN/model/serial_rpt/). "
+             "Setting this is independent of --tdms-path; they can coexist.",
+    )
+    parser.add_argument("--model-id", default=os.environ.get("NVH_MODEL_ID", "MODEL-A"),
+                        help="Model id used in the raw-dir path (default MODEL-A).")
+    parser.add_argument("--serial-no", default=os.environ.get("NVH_SERIAL_NO", "SN-DEMO"),
+                        help="Serial number used in the raw-dir path (default SN-DEMO).")
+    parser.add_argument("--serial-rpt", type=int,
+                        default=int(os.environ.get("NVH_SERIAL_RPT", "1")),
+                        help="Serial repeat counter used in the raw-dir path (default 1).")
     args = parser.parse_args()
 
     context = zmq.Context.instance()
@@ -334,6 +410,10 @@ def main() -> None:
                 socket, args.plc_url, tdms_writer,
                 sensor_sensitivity_mv_per_eu=args.sensitivity,
                 pregain_db=args.pregain_db,
+                rollover_base_dir=args.raw_dir or None,
+                model_id=args.model_id,
+                serial_no=args.serial_no,
+                serial_rpt=args.serial_rpt,
             )
         else:
             _run_auto_mode(socket, tdms_writer)
