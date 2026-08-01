@@ -6,6 +6,50 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-29 20:41 UTC — GUI scaffold merged (PR #1)
+**Commits:** `2d5ace3` (scaffold add), `3b92fa4` (merge)
+
+Second Claude account working in parallel on `claude/gui-scaffold` added:
+
+- `qt-app/`: bare PySide6 desktop application skeleton, design-tokens wired
+  in, placeholder screens with TODO banners (Master Entry, Live Display,
+  Report, SPC screens).
+- `web-frontend/`: Tailwind/React shell with matching placeholder screens.
+
+No data wiring — layout/navigation skeletons only, ready for M1 to wire
+against the FastAPI backend. Merged into this branch via PR #1 with zero
+conflicts.
+
+## 2026-07-29 15:11 UTC — Phase C: Named master profiles + two-stage LIMIT/THRESHOLD config
+**Commit:** `da80efd`
+
+Added the two-stage grading configuration layer matching the real system's
+`Limit Config.vi` and `MASTER SETUP` screens:
+
+- **New pydantic models:** `MasterProfile` / `LimitConfigEntry` in
+  `nvh_contract/models.py`; both exported from the package.
+- **New ORM rows:** `MasterProfileRow` / `LimitConfigRow` (6-column
+  composite PK: model_id+program_name+gear_label+direction+channel_name+
+  stat_name) in `nvh_contract/db.py`; both auto-created in `init_db()`.
+- **New module:** `analysis_engine.grading.limit_config` —
+  `LimitConfigValue`, `import_limit_config_from_masters()` (the "Import
+  From MASTER" button's backend), `check_value_with_threshold()` (g_level
+  informational from LIMIT band; ok_flag from threshold-widened effective
+  bounds), `grade_dc_record_with_limits()`.
+- **Formula:** `effective_low = limit_low - threshold_low`,
+  `effective_high = limit_high + threshold_high`; pass iff value within
+  effective bounds.
+- **Pipeline:** `analyze_dc_record()` gains optional `limit_configs` param;
+  priority `limit_configs > masters > None`. All existing call sites
+  unaffected — this phase is purely additive.
+- **Seed script:** seeds `MasterProfileRow("REVA")` + `LimitConfigRow` per
+  parameter via `import_limit_config_from_masters()`; bug fixed: `add()` →
+  `merge()` for `LimitConfigRow` re-run idempotency.
+- New `test_limit_config.py` + extensions to `test_models.py`,
+  `test_db.py`, `test_seed_demo_data.py`. New Phase C section in
+  `docs/data-contract.md`.
+- **Result:** 123/123 tests passing.
+
 ## 2026-07-29 14:24 UTC — Phase B: Named 49-parameter grading framework
 **Commit:** `5603a1d`
 

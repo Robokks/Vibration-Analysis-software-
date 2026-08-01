@@ -296,6 +296,89 @@ harness's structured summary is available). Will update the recurring
 hourly Routine's prompt to append full new turns to this file going
 forward, not just a condensed line.
 
+### Turn
+**User:** "i have another Claude account and this repo is shared to the account / u tell me what need work parallely"
+
+**Assistant:** Explained which parts of the A–E plan are genuinely parallelizable without merge conflicts. The GUI scaffold (bare PySide6/React shells with design-tokens wired in, no data wiring) can start now on a separate branch (`claude/gui-scaffold`) since it only touches `qt-app/` and `web-frontend/`, both empty — zero overlap with Phases B–E. Recommended the second account take the GUI scaffold immediately so the UI skeleton is in place before M1 wires real data, while this account finishes Phase C.
+
+### Turn — Phase C planning (plan mode)
+**Assistant:** Entered plan mode for Phase C: Named Master Profiles + Two-Stage LIMIT/THRESHOLD Config. Launched Explore and Plan sub-agents. Design confirmed from client screenshots of `Limit Config.vi` and `MASTER SETUP` screens:
+
+- One named `NVH-PROGRAM` profile (e.g. "REVA") covers all gears/directions for a model; the `limit_configs` table's `gear_label+direction` (STEP) and `channel_name`/`stat_name` (CHANNEL/PARAMETER) disambiguate rows within one profile.
+- Multiple programs for the same model each independently "Import From MASTER" the same auto-computed band, then diverge only in manually-tuned THRESHOLD margins. Master signatures stay unscoped by program — one band per model, built exactly as today.
+- **LIMIT/THRESHOLD formula:** `effective_low = limit_low - threshold_low`, `effective_high = limit_high + threshold_high`. A value passes iff `effective_low <= value <= effective_high`. THRESHOLD is a manually-tunable outward margin, not a replacement band and not a G-ladder substitution.
+- G1–G10 ladder (`g_level`) still computed from the LIMIT band for informational display — not the pass/fail source once a limit config is supplied; the threshold-widened range check is.
+- New pydantic models: `MasterProfile` and `LimitConfigEntry` in `libs/nvh_contract/models.py`.
+- New ORM rows: `MasterProfileRow` (PK: model_id+program_name) and `LimitConfigRow` (6-column composite PK: model_id+program_name+gear_label+direction+channel_name+stat_name) in `libs/nvh_contract/db.py`.
+- New module: `analysis_engine/grading/limit_config.py` with `LimitConfigValue`, `import_limit_config_from_masters()`, `check_value_with_threshold()`, `grade_dc_record_with_limits()`. Reuses `EnvelopeCheckResult`/`DcGradingSummary` from `envelope_check.py` and `compute_g_ladder`/`classify_g_level` from `g_ladder.py` unchanged.
+- `analyze_dc_record()` gains optional `limit_configs` param; priority `limit_configs > masters > None`. All existing call sites unaffected.
+- Seed script extended: `MasterProfileRow("REVA")` + `LimitConfigRow` per parameter; returns `n_limit_config_rows` in summary dict.
+- New `test_limit_config.py`; extend `test_models.py`, `test_db.py`, `test_seed_demo_data.py`; new Phase C section in `docs/data-contract.md`.
+
+Full plan text is preserved verbatim in `docs/data-contract.md` "Phase C: Master Profiles & Two-Stage Limits" section and in the plan file (`/root/.claude/plans/we-are-going-build-delegated-wirth.md`, "Phase C" section).
+
+**User:** "do"
+
+### Turn — Phase C implementation
+**Assistant:** Implemented Phase C file-by-file following the approved plan:
+
+1. Added `MasterProfile` and `LimitConfigEntry` pydantic models to `libs/nvh_contract/src/nvh_contract/models.py` and exported both from `__init__.py`.
+2. Added `MasterProfileRow` and `LimitConfigRow` ORM classes to `libs/nvh_contract/src/nvh_contract/db.py`; registered both in `init_db()`.
+3. Created `analysis-engine/src/analysis_engine/grading/limit_config.py` with `LimitConfigValue`, `import_limit_config_from_masters()`, `check_value_with_threshold()`, and `grade_dc_record_with_limits()`.
+4. Extended `analysis-engine/src/analysis_engine/pipeline.py`: `analyze_dc_record()` gains `limit_configs: dict[str, LimitConfigValue] | None = None`; grading priority `limit_configs > masters > None`.
+5. Extended `web-backend/scripts/seed_demo_data.py`: added `PROGRAM_NAME = "REVA"`, creates `MasterProfileRow` and `LimitConfigRow` rows per parameter. Fixed a re-run bug surfaced during this work: `session.add()` → `session.merge()` for `LimitConfigRow` so the composite PK doesn't violate uniqueness on a second run (same pattern as `MasterProfileRow`).
+6. Added Phase C tests: `MasterProfile`/`LimitConfigEntry` round-trip in `test_models.py`; ORM round-trip + composite PK behavior in `test_db.py`; full coverage in new `test_limit_config.py` (boundary inclusivity, threshold widening, skip-missing-config, independence of the two grading paths); extended `test_seed_demo_data.py` with `master_profiles`/`limit_configs` row-count assertions.
+7. Added Phase C section to `docs/data-contract.md`.
+
+**Test suite: 123/123 passing** across all packages. Purely additive — all Phase A/B behavior unchanged.
+
+### Turn
+**User (stop-hook feedback):** "[~/.claude/stop-hook-git-check.sh]: There are uncommitted changes in the repository. Please commit and push these changes to the remote branch."
+
+**Assistant:** Staged all Phase C changes, committed as `da80efd` ("Phase C: named master profiles + two-stage LIMIT/THRESHOLD config"), pushed to `origin/claude/nvh-software-python-28zib3`.
+
+Around the same time, the second Claude account working in parallel pushed commit `2d5ace3` ("Add web-frontend and qt-app GUI scaffolds (no data wiring yet)") to `claude/gui-scaffold`, adding bare PySide6 and Tailwind/React shells with design-tokens wired in and TODO-banner placeholder screens for Master Entry, Live Display, Report, and SPC screens. That branch was then merged into this branch via PR #1 (merge commit `3b92fa4`, 2026-07-29 20:41 IST).
+
+### Turn
+**User:** "another work completed w / next work"
+
+**Assistant:** Confirmed Phase C complete (commit `da80efd`, 123 tests passing) and GUI scaffold from second account merged (PR #1, commit `3b92fa4`). Identified Phase D as next: flat CODE-RESULT-style grading output table matching the real system's per-unit report shape. Confirmed target shape from a real client export:
+
+```
+STEP | GEAR_DIRECTION | CHANNEL | PARAMETER | ORDERS | LOW | ACTUAL | HIGH | UNIT | OK/NOK
+```
+
+Example row: `STEP 2 | I_STYC | TRANSMISSION VIBRATION | IN_H1 | 13 | 26 | 35.369 | 35 | dB m/s2 | NOK` (LOW/HIGH here are already the combined effective bounds, not the raw master band). Known gap: `EnvelopeCheckResult` currently stores only `g_level`/`ok_flag` — it does not surface the resolved `LOW`/`HIGH` bounds needed for this table. Entered plan mode and launched an Explore sub-agent to map the current reports layer and quantify the gap.
+
+### Turn
+**User:** "in this account usage i limit is going to hit / i want switch work to another account"
+
+**Assistant:** Acknowledged the usage-limit concern. Stopped Phase D planning (the Explore sub-agent was still in flight). Updated the plan file to record Phase D as handed off. Prepared a handoff brief for the user to relay to the other Claude account: repo (`robokks/vibration-analysis-software-`), branch (`claude/nvh-software-python-28zib3`), what's done (Phases A–C complete, GUI scaffold merged), what's next (Phase D — the flat grading-results table), the confirmed real target shape (`STEP | GEAR_DIRECTION | CHANNEL | PARAMETER | ORDERS | LOW | ACTUAL | HIGH | UNIT | OK/NOK`), the note that LOW/HIGH in the export are the already-combined `effective_low`/`effective_high` bounds (not the raw master band shown separately), and the specific known gap to fix first: `EnvelopeCheckResult` (in `analysis_engine/grading/envelope_check.py`) does not yet surface resolved LOW/HIGH bounds.
+
+### Turn — recurring Routine activity (blocked by plan mode)
+*(Multiple automated Routine prompt messages from `trig_01YC1uzpdcAiUE875c5vMBdR`, fired roughly hourly from 2026-07-29 onward through 2026-08-01.)*
+
+**Routine prompt (repeated):** "Update the conversation record in /home/user/Vibration-Analysis-software- (branch claude/nvh-software-python-28zib3) with everything new since the last update..."
+
+**Assistant:** Plan mode remained active throughout this period (entered while starting Phase D planning). The recurring Routine fires each hour but plan mode blocks all file writes except to the plan file itself, so no CONVERSATION_LOG.md or PROGRESS.md updates could be made. Routine became a no-op until plan mode was exited.
+
+### Turn
+**User:** "check the status"
+
+**Assistant:** Reported:
+- Working tree clean on `claude/nvh-software-python-28zib3` (last commit `3b92fa4`).
+- Phases A, B, C complete and tested (123 tests passing).
+- GUI scaffold from second account merged (PR #1).
+- Phase D planning started, then interrupted by account-switch request; handoff brief prepared; plan file updated to record D as handed off.
+- Plan mode currently active; CONVERSATION_LOG.md and PROGRESS.md not updated since Phase B.
+- Recurring Routine firing hourly but blocked by plan mode.
+- Next: exit plan mode, then update both log files and push.
+
+### Turn — 2026-08-01, log catch-up
+**User (Routine prompt):** "Update the conversation record..."
+
+**Assistant (this update):** Exited plan mode (approved via ExitPlanMode). Updated CONVERSATION_LOG.md with all turns since last recorded entry: parallel-work discussion, Phase C plan approval and implementation, Phase C commit, GUI scaffold merge, account-switch discussion, Phase D handoff, recurring Routine activity, "check the status" turn, and this catch-up turn itself. Updated PROGRESS.md with Phase C and GUI scaffold entries. Committing and pushing both files now.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)
