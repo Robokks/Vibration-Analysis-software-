@@ -1696,6 +1696,12 @@ Committed as `d5e5de6` ("feat: add write/edit endpoints for models, programs, li
 
 **Assistant (this update):** Updated CONVERSATION_LOG.md with retroactive entries for the undocumented phases (DX housekeeping, NI-DAQmx source, Phases F–M, Phase N, Phase O bugs) and the current session turns above. Updated PROGRESS.md with the same retroactive entries. Committing and pushing.
 
+### Turn — 2026-08-01: user reports bugs after live testing
+
+**User:** "i tested app / lot of gabs and deviation and bug is there"
+
+**Assistant:** Asked the user to describe what they found in detail — which screen or feature was broken, what happened vs what was expected, and whether they were running against the simulator or real NI-DAQmx hardware — so the root cause could be found and fixed rather than guessing.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)
