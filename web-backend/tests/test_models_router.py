@@ -249,3 +249,376 @@ def test_patch_calibration_persists_across_a_fresh_get(client, seeded_db):
 def test_get_calibration_unknown_model_returns_404(client):
     response = client.get("/models/NO-SUCH-MODEL/calibrations/vib_a")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /models -- create
+# ---------------------------------------------------------------------------
+
+_NEW_MODEL_BODY = {
+    "model_id": "TEST-NEW",
+    "model_name": "Test New Model",
+    "drive_teeth": {"1st": 20, "2nd": 18},
+    "idler_teeth_1": {"1st": 30, "2nd": 28},
+    "layshaft_teeth": {"1st": 40, "2nd": 38},
+    "ratios": {"1st": 2.0, "2nd": 1.8},
+}
+
+
+def test_post_model_creates_and_returns_model(client):
+    response = client.post("/models", json=_NEW_MODEL_BODY)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["model_id"] == "TEST-NEW"
+    assert body["model_name"] == "Test New Model"
+    assert body["drive_teeth"]["1st"] == 20
+    assert body["ratios"]["2nd"] == 1.8
+
+
+def test_post_model_persists_across_get(client):
+    client.post("/models", json=_NEW_MODEL_BODY)
+    response = client.get("/models/TEST-NEW")
+    assert response.status_code == 200
+    assert response.json()["model_name"] == "Test New Model"
+
+
+def test_post_model_duplicate_returns_409(client):
+    client.post("/models", json=_NEW_MODEL_BODY)
+    response = client.post("/models", json=_NEW_MODEL_BODY)
+    assert response.status_code == 409
+
+
+def test_post_model_appears_in_list(client):
+    client.post("/models", json=_NEW_MODEL_BODY)
+    ids = [m["model_id"] for m in client.get("/models").json()]
+    assert "TEST-NEW" in ids
+
+
+# ---------------------------------------------------------------------------
+# PUT /models/{model_id} -- update
+# ---------------------------------------------------------------------------
+
+
+def test_put_model_updates_fields(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    original = client.get(f"/models/{model_id}").json()
+    update_body = {**original}
+    update_body.pop("model_id")
+    update_body["model_name"] = "Renamed Model"
+    response = client.put(f"/models/{model_id}", json=update_body)
+    assert response.status_code == 200
+    assert response.json()["model_name"] == "Renamed Model"
+    assert response.json()["model_id"] == model_id
+
+
+def test_put_model_persists_across_get(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    original = client.get(f"/models/{model_id}").json()
+    update_body = {**original}
+    update_body.pop("model_id")
+    update_body["model_name"] = "Persisted Name"
+    client.put(f"/models/{model_id}", json=update_body)
+    assert client.get(f"/models/{model_id}").json()["model_name"] == "Persisted Name"
+
+
+def test_put_model_unknown_returns_404(client):
+    response = client.put("/models/NO-SUCH", json={
+        "model_name": "X", "drive_teeth": {}, "idler_teeth_1": {},
+        "layshaft_teeth": {}, "ratios": {},
+    })
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE /models/{model_id}
+# ---------------------------------------------------------------------------
+
+
+def test_delete_model_removes_from_list(client):
+    client.post("/models", json=_NEW_MODEL_BODY)
+    response = client.delete("/models/TEST-NEW")
+    assert response.status_code == 204
+    ids = [m["model_id"] for m in client.get("/models").json()]
+    assert "TEST-NEW" not in ids
+
+
+def test_delete_model_unknown_returns_404(client):
+    response = client.delete("/models/NO-SUCH")
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /models/{model_id}/programs -- create program
+# ---------------------------------------------------------------------------
+
+
+def test_post_program_creates_and_returns(client, seeded_db):
+    _, summary = seeded_db
+    response = client.post(f"/models/{summary['model_id']}/programs", json={"program_name": "REVB"})
+    assert response.status_code == 201
+    body = response.json()
+    assert body["program_name"] == "REVB"
+    assert body["model_id"] == summary["model_id"]
+
+
+def test_post_program_appears_in_list(client, seeded_db):
+    _, summary = seeded_db
+    client.post(f"/models/{summary['model_id']}/programs", json={"program_name": "REVB"})
+    names = [p["program_name"] for p in client.get(f"/models/{summary['model_id']}/programs").json()]
+    assert "REVB" in names
+
+
+def test_post_program_duplicate_returns_409(client, seeded_db):
+    _, summary = seeded_db
+    response = client.post(f"/models/{summary['model_id']}/programs", json={"program_name": "REVA"})
+    assert response.status_code == 409
+
+
+def test_post_program_unknown_model_returns_404(client):
+    response = client.post("/models/NO-SUCH/programs", json={"program_name": "REVA"})
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE /models/{model_id}/programs/{program_name}
+# ---------------------------------------------------------------------------
+
+
+def test_delete_program_removes_from_list(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    client.post(f"/models/{model_id}/programs", json={"program_name": "REVB"})
+    response = client.delete(f"/models/{model_id}/programs/REVB")
+    assert response.status_code == 204
+    names = [p["program_name"] for p in client.get(f"/models/{model_id}/programs").json()]
+    assert "REVB" not in names
+
+
+def test_delete_program_unknown_returns_404(client, seeded_db):
+    _, summary = seeded_db
+    response = client.delete(f"/models/{summary['model_id']}/programs/NO-SUCH-PROG")
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST .../import-from-master
+# ---------------------------------------------------------------------------
+
+
+def test_import_from_master_seeds_limit_configs(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    # Create a fresh program with no limit configs.
+    client.post(f"/models/{model_id}/programs", json={"program_name": "REVB"})
+    response = client.post(
+        f"/models/{model_id}/programs/REVB/import-from-master",
+        params={"gear_label": "R", "direction": "RU", "channel_name": "vib_a"},
+    )
+    assert response.status_code == 200
+    rows = response.json()
+    # Should return at least one row with a non-null limit_low (seeded from master).
+    rows_with_limits = [r for r in rows if r["limit_low"] is not None]
+    assert len(rows_with_limits) > 0
+
+
+def test_import_from_master_preserves_existing_thresholds(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    # Tune REVA's "RMS Avg" threshold, then re-import and check threshold survives.
+    _patch_threshold(client, summary, "RMS Avg", 0.07, 0.09)
+    client.post(
+        f"/models/{model_id}/programs/REVA/import-from-master",
+        params={"gear_label": "R", "direction": "RU", "channel_name": "vib_a"},
+    )
+    refreshed = client.get(
+        f"/models/{model_id}/programs/REVA/parameters",
+        params={"gear_label": "R", "direction": "RU"},
+    ).json()
+    rms = next(r for r in refreshed if r["stat_name"] == "RMS Avg")
+    assert rms["threshold_low"] == 0.07
+    assert rms["threshold_high"] == 0.09
+
+
+def test_import_from_master_unknown_program_returns_404(client, seeded_db):
+    _, summary = seeded_db
+    response = client.post(
+        f"/models/{summary['model_id']}/programs/NO-SUCH/import-from-master",
+        params={"gear_label": "R", "direction": "RU"},
+    )
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST .../limit-configs -- create / upsert individual entry
+# ---------------------------------------------------------------------------
+
+
+def _post_limit_config(client, summary, **overrides):
+    payload = {
+        "gear_label": "R", "direction": "RU", "channel_name": "vib_a",
+        "stat_name": "RMS Avg", "limit_low": 1.0, "limit_high": 5.0,
+        **overrides,
+    }
+    return client.post(
+        f"/models/{summary['model_id']}/programs/REVA/limit-configs",
+        json=payload,
+    )
+
+
+def test_post_limit_config_creates_entry(client, seeded_db):
+    _, summary = seeded_db
+    response = _post_limit_config(client, summary, limit_low=0.5, limit_high=3.0)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["stat_name"] == "RMS Avg"
+    assert body["limit_low"] == 0.5
+    assert body["limit_high"] == 3.0
+
+
+def test_post_limit_config_upserts_existing(client, seeded_db):
+    _, summary = seeded_db
+    _post_limit_config(client, summary, limit_low=1.0, limit_high=4.0)
+    response = _post_limit_config(client, summary, limit_low=2.0, limit_high=6.0)
+    assert response.status_code == 201
+    assert response.json()["limit_low"] == 2.0
+    assert response.json()["limit_high"] == 6.0
+
+
+def test_post_limit_config_unknown_model_returns_404(client):
+    response = client.post(
+        "/models/NO-SUCH/programs/REVA/limit-configs",
+        json={"gear_label": "R", "direction": "RU", "stat_name": "RMS Avg",
+              "limit_low": 1.0, "limit_high": 5.0},
+    )
+    assert response.status_code == 404
+
+
+def test_post_limit_config_unknown_program_returns_404(client, seeded_db):
+    _, summary = seeded_db
+    response = client.post(
+        f"/models/{summary['model_id']}/programs/NO-SUCH/limit-configs",
+        json={"gear_label": "R", "direction": "RU", "stat_name": "RMS Avg",
+              "limit_low": 1.0, "limit_high": 5.0},
+    )
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE .../limit-configs/{stat_name}
+# ---------------------------------------------------------------------------
+
+
+def test_delete_limit_config_removes_entry(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    response = client.delete(
+        f"/models/{model_id}/programs/REVA/limit-configs/RMS%20Avg",
+        params={"gear_label": "R", "direction": "RU", "channel_name": "vib_a"},
+    )
+    assert response.status_code == 204
+    refreshed = client.get(
+        f"/models/{model_id}/programs/REVA/parameters",
+        params={"gear_label": "R", "direction": "RU"},
+    ).json()
+    rms = next((r for r in refreshed if r["stat_name"] == "RMS Avg"), None)
+    # Row may still appear if a master signature exists, but limit_low is now None.
+    if rms is not None:
+        assert rms["limit_low"] is None
+
+
+def test_delete_limit_config_unknown_returns_404(client, seeded_db):
+    _, summary = seeded_db
+    response = client.delete(
+        f"/models/{summary['model_id']}/programs/REVA/limit-configs/NoSuchStat",
+        params={"gear_label": "R", "direction": "RU"},
+    )
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Table config steps: GET / PUT / DELETE
+# ---------------------------------------------------------------------------
+
+
+def test_list_table_config_steps_empty_for_new_program(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    client.post(f"/models/{model_id}/programs", json={"program_name": "REVB"})
+    response = client.get(f"/models/{model_id}/programs/REVB/table-config/steps")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_put_table_config_step_creates_entry(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    client.post(f"/models/{model_id}/programs", json={"program_name": "REVB"})
+    response = client.put(
+        f"/models/{model_id}/programs/REVB/table-config/steps",
+        json={"gear_label": "R", "direction": "RU", "channel_name": "vib_a", "step_order": 1},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["gear_label"] == "R"
+    assert body["direction"] == "RU"
+    assert body["step_order"] == 1
+
+
+def test_put_table_config_step_updates_order(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    client.post(f"/models/{model_id}/programs", json={"program_name": "REVB"})
+    client.put(
+        f"/models/{model_id}/programs/REVB/table-config/steps",
+        json={"gear_label": "R", "direction": "RU", "step_order": 1},
+    )
+    response = client.put(
+        f"/models/{model_id}/programs/REVB/table-config/steps",
+        json={"gear_label": "R", "direction": "RU", "step_order": 3},
+    )
+    assert response.status_code == 200
+    assert response.json()["step_order"] == 3
+
+
+def test_put_table_config_step_appears_in_list(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    client.post(f"/models/{model_id}/programs", json={"program_name": "REVB"})
+    client.put(
+        f"/models/{model_id}/programs/REVB/table-config/steps",
+        json={"gear_label": "R", "direction": "RU", "step_order": 1},
+    )
+    client.put(
+        f"/models/{model_id}/programs/REVB/table-config/steps",
+        json={"gear_label": "R", "direction": "STYD", "step_order": 2},
+    )
+    steps = client.get(f"/models/{model_id}/programs/REVB/table-config/steps").json()
+    assert len(steps) == 2
+    assert steps[0]["step_order"] == 1  # sorted by step_order
+
+
+def test_delete_table_config_step_removes_entry(client, seeded_db):
+    _, summary = seeded_db
+    model_id = summary["model_id"]
+    client.post(f"/models/{model_id}/programs", json={"program_name": "REVB"})
+    client.put(
+        f"/models/{model_id}/programs/REVB/table-config/steps",
+        json={"gear_label": "R", "direction": "RU", "step_order": 1},
+    )
+    response = client.delete(
+        f"/models/{model_id}/programs/REVB/table-config/steps",
+        params={"gear_label": "R", "direction": "RU"},
+    )
+    assert response.status_code == 204
+    assert client.get(f"/models/{model_id}/programs/REVB/table-config/steps").json() == []
+
+
+def test_delete_table_config_step_unknown_returns_404(client, seeded_db):
+    _, summary = seeded_db
+    response = client.delete(
+        f"/models/{summary['model_id']}/programs/REVA/table-config/steps",
+        params={"gear_label": "NO-GEAR", "direction": "RU"},
+    )
+    assert response.status_code == 404

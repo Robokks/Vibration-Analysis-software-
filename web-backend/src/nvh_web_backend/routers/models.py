@@ -2,28 +2,44 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from nvh_api_schemas.catalog import (
     CalibrationOut,
     CalibrationUpdate,
     ChannelConfigOut,
+    LimitConfigCreate,
     LimitConfigLimitUpdate,
     LimitConfigThresholdUpdate,
+    MasterProfileCreate,
+    ModelCreate,
+    ModelUpdate,
     ParameterCatalogRowOut,
     TableConfigParameterUpdate,
+    TableConfigStepOut,
+    TableConfigStepUpsert,
 )
-from nvh_contract.db import ChannelRow, DcRecordRow, MasterProfileRow, ModelRow, TestRunRow
+from nvh_contract.db import ChannelRow, DcRecordRow, MasterProfileRow, ModelRow, TableConfigStepRow, TestRunRow
 from nvh_contract.models import MasterProfile, Model
 from sqlalchemy.orm import Session
 
 from nvh_web_backend.adapters import model_row_to_model
 from nvh_web_backend.catalog_service import (
+    create_master_profile,
+    create_model,
+    create_or_replace_limit_config,
+    delete_limit_config_row,
+    delete_master_profile,
+    delete_model,
+    delete_table_config_step,
     get_or_create_calibration,
+    import_limit_configs_from_master_signatures,
     parameter_catalog_rows,
     set_table_config_parameter,
     update_calibration,
     update_limit_config_limit,
     update_limit_config_threshold,
+    update_model,
+    upsert_table_config_step,
 )
 from nvh_web_backend.db import get_session
 
@@ -37,10 +53,28 @@ def _load_model_row(session: Session, model_id: str) -> ModelRow:
     return row
 
 
+def _load_program_row(session: Session, model_id: str, program_name: str) -> MasterProfileRow:
+    row = session.get(MasterProfileRow, (model_id, program_name))
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no program {program_name!r} for model {model_id!r}")
+    return row
+
+
 @router.get("/models")
 def list_models(session: Session = Depends(get_session)) -> list[dict[str, str]]:
     rows = session.query(ModelRow).all()
     return [{"model_id": row.model_id, "model_name": row.model_name} for row in rows]
+
+
+@router.post("/models", status_code=201)
+def create_model_endpoint(
+    body: ModelCreate = Body(...),
+    session: Session = Depends(get_session),
+) -> Model:
+    row = create_model(session, body)
+    if row is None:
+        raise HTTPException(status_code=409, detail=f"model {body.model_id!r} already exists")
+    return model_row_to_model(row)
 
 
 @router.get("/models/{model_id}")
@@ -48,11 +82,58 @@ def get_model(model_id: str, session: Session = Depends(get_session)) -> Model:
     return model_row_to_model(_load_model_row(session, model_id))
 
 
+@router.put("/models/{model_id}")
+def update_model_endpoint(
+    model_id: str,
+    body: ModelUpdate = Body(...),
+    session: Session = Depends(get_session),
+) -> Model:
+    row = _load_model_row(session, model_id)
+    return model_row_to_model(update_model(session, row, body))
+
+
+@router.delete("/models/{model_id}", status_code=204)
+def delete_model_endpoint(
+    model_id: str,
+    session: Session = Depends(get_session),
+) -> Response:
+    row = _load_model_row(session, model_id)
+    delete_model(session, row)
+    return Response(status_code=204)
+
+
 @router.get("/models/{model_id}/programs")
 def list_programs(model_id: str, session: Session = Depends(get_session)) -> list[MasterProfile]:
     _load_model_row(session, model_id)  # 404 if the model itself doesn't exist
     rows = session.query(MasterProfileRow).filter_by(model_id=model_id).all()
     return [MasterProfile(model_id=row.model_id, program_name=row.program_name, created_at=row.created_at) for row in rows]
+
+
+@router.post("/models/{model_id}/programs", status_code=201)
+def create_program(
+    model_id: str,
+    body: MasterProfileCreate = Body(...),
+    session: Session = Depends(get_session),
+) -> MasterProfile:
+    _load_model_row(session, model_id)
+    row = create_master_profile(session, model_id, body.program_name, datetime.now(timezone.utc).isoformat())
+    if row is None:
+        raise HTTPException(status_code=409, detail=f"program {body.program_name!r} already exists for model {model_id!r}")
+    return MasterProfile(model_id=row.model_id, program_name=row.program_name, created_at=row.created_at)
+
+
+@router.delete("/models/{model_id}/programs/{program_name}", status_code=204)
+def delete_program(
+    model_id: str,
+    program_name: str,
+    session: Session = Depends(get_session),
+) -> Response:
+    _load_model_row(session, model_id)
+    row = session.get(MasterProfileRow, (model_id, program_name))
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"program {program_name!r} not found for model {model_id!r}")
+    delete_master_profile(session, row)
+    return Response(status_code=204)
 
 
 @router.get("/models/{model_id}/programs/{program_name}/parameters")
@@ -125,6 +206,68 @@ def update_limit(
     return _refreshed_row(session, model_id, program_name, gear_label, direction, channel_name, stat_name)
 
 
+@router.post("/models/{model_id}/programs/{program_name}/import-from-master", status_code=200)
+def import_from_master(
+    model_id: str,
+    program_name: str,
+    gear_label: str = Query(...),
+    direction: str = Query(...),
+    channel_name: str = Query("vib_a"),
+    session: Session = Depends(get_session),
+) -> list[ParameterCatalogRowOut]:
+    """The "Import From MASTER" button backend: seeds or refreshes
+    LimitConfigRows for all stats with a master signature for this
+    (model, gear, direction), setting LIMIT_LOW/HIGH from band_min/band_max
+    while preserving any existing THRESHOLD values. Returns the refreshed
+    parameter catalog rows so the client can update its table in place."""
+    _load_model_row(session, model_id)
+    _load_program_row(session, model_id, program_name)
+    import_limit_configs_from_master_signatures(
+        session, model_id, program_name, gear_label, direction, channel_name,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    return parameter_catalog_rows(session, model_id, program_name, gear_label, direction, channel_name)
+
+
+@router.post("/models/{model_id}/programs/{program_name}/limit-configs", status_code=201)
+def create_limit_config(
+    model_id: str,
+    program_name: str,
+    body: LimitConfigCreate = Body(...),
+    session: Session = Depends(get_session),
+) -> ParameterCatalogRowOut:
+    """Creates or fully replaces a single LimitConfigRow. Use the
+    import-from-master action to bulk-seed from master signatures; use this
+    endpoint to add or overwrite individual entries."""
+    _load_model_row(session, model_id)
+    _load_program_row(session, model_id, program_name)
+    create_or_replace_limit_config(
+        session, model_id, program_name, body,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    return _refreshed_row(session, model_id, program_name, body.gear_label, body.direction, body.channel_name, body.stat_name)
+
+
+@router.delete("/models/{model_id}/programs/{program_name}/limit-configs/{stat_name}", status_code=204)
+def delete_limit_config(
+    model_id: str,
+    program_name: str,
+    stat_name: str,
+    gear_label: str = Query(...),
+    direction: str = Query(...),
+    channel_name: str = Query("vib_a"),
+    session: Session = Depends(get_session),
+) -> Response:
+    _load_model_row(session, model_id)
+    deleted = delete_limit_config_row(session, model_id, program_name, gear_label, direction, channel_name, stat_name)
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=_missing_limit_config_detail(model_id, program_name, gear_label, direction, channel_name, stat_name),
+        )
+    return Response(status_code=204)
+
+
 @router.patch("/models/{model_id}/programs/{program_name}/table-config/parameters/{stat_name}")
 def update_table_config_parameter(
     model_id: str,
@@ -150,6 +293,70 @@ def update_table_config_parameter(
     if not ok:
         raise HTTPException(status_code=404, detail=f"unknown stat_name {stat_name!r}")
     return _refreshed_row(session, model_id, program_name, gear_label, direction, channel_name, stat_name)
+
+
+@router.get("/models/{model_id}/programs/{program_name}/table-config/steps")
+def list_table_config_steps(
+    model_id: str,
+    program_name: str,
+    channel_name: str = Query("vib_a"),
+    session: Session = Depends(get_session),
+) -> list[TableConfigStepOut]:
+    _load_model_row(session, model_id)
+    rows = (
+        session.query(TableConfigStepRow)
+        .filter_by(model_id=model_id, program_name=program_name, channel_name=channel_name)
+        .order_by(TableConfigStepRow.step_order)
+        .all()
+    )
+    return [
+        TableConfigStepOut(
+            model_id=r.model_id, program_name=r.program_name,
+            gear_label=r.gear_label, direction=r.direction,
+            channel_name=r.channel_name, step_order=r.step_order,
+        )
+        for r in rows
+    ]
+
+
+@router.put("/models/{model_id}/programs/{program_name}/table-config/steps", status_code=200)
+def upsert_table_config_step_endpoint(
+    model_id: str,
+    program_name: str,
+    body: TableConfigStepUpsert = Body(...),
+    session: Session = Depends(get_session),
+) -> TableConfigStepOut:
+    """Adds or updates a step entry (gear+direction+channel → step_order).
+    Idempotent: re-submitting the same tuple with the same step_order is a
+    no-op. Useful for re-ordering existing steps too."""
+    _load_model_row(session, model_id)
+    _load_program_row(session, model_id, program_name)
+    row = upsert_table_config_step(session, model_id, program_name, body, datetime.now(timezone.utc).isoformat())
+    return TableConfigStepOut(
+        model_id=row.model_id, program_name=row.program_name,
+        gear_label=row.gear_label, direction=row.direction,
+        channel_name=row.channel_name, step_order=row.step_order,
+    )
+
+
+@router.delete("/models/{model_id}/programs/{program_name}/table-config/steps", status_code=204)
+def delete_table_config_step_endpoint(
+    model_id: str,
+    program_name: str,
+    gear_label: str = Query(...),
+    direction: str = Query(...),
+    channel_name: str = Query("vib_a"),
+    session: Session = Depends(get_session),
+) -> Response:
+    _load_model_row(session, model_id)
+    deleted = delete_table_config_step(session, model_id, program_name, gear_label, direction, channel_name)
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no table config step for model={model_id!r} program={program_name!r} "
+                   f"gear={gear_label!r} direction={direction!r} channel={channel_name!r}",
+        )
+    return Response(status_code=204)
 
 
 @router.get("/models/{model_id}/channels", response_model=list[ChannelConfigOut])
