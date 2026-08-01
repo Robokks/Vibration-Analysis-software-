@@ -1511,6 +1511,43 @@ tab is to make those visible to the operator in real time. Sent the
 captures to the user, updated PROGRESS.md, wrote this transcript
 entry, and pushed.
 
+### Turn — developer-experience housekeeping + nvh-launcher
+*(Retroactive entry — built in a separate session; exact conversation text not available.)*
+
+**Work done (commits `06e7b62`–`9ef0fff`, 2026-07-30):** Added `requirements.txt` / `requirements-dev.txt` flat pip lists; lowered minimum Python from 3.11 to 3.10; README updates (Windows `.venv/bin/` prefix drop, PyCharm per-subfolder venv trap warning); `scripts/fix_pycharm.sh` + `.bat`, `scripts/install_local.sh` + `.bat`. First version of `nvh-launcher` (`9ef0fff`): single PySide6 window (Seed Demo Data, Run Analysis Demo, Open Web UI buttons + shared log) replacing the need for four separate terminals.
+
+### Turn — NI-DAQmx source + DMA/TDMS producer (2026-07-31 03:xx UTC)
+*(Retroactive entry — built in a separate session; exact conversation text not available.)*
+
+**Work done (commits `1f891c8` `716fdfd` `491a6a6`):** `live_daq.py` — NI-DAQmx continuous-acquisition producer matching the exact ZMQ wire shapes of `live_simulator.py` (the intended LabVIEW seam). Works with real NI hardware or the NI MAX simulated device on Windows. Launcher updated to one row with a Simulation/NI-DAQmx pill toggle. Both producers extended with `--tdms-path` (raw TDMS file alongside the ZMQ stream) and `--buffer-seconds` (NI-DAQmx DMA buffer size).
+
+### Turn — Phases F–M: PLC-driven live-acquisition pipeline (2026-07-31 04:xx UTC)
+*(Retroactive entry — built in a separate session; exact conversation text not available.)*
+
+**Work done (commits `3b4f324`–`d444bfe`, nine sequential commits):**
+- **Phase F** (`3b4f324`, `bda304b`): `NvhStateMachine` + `PlcStateUpdate` schema. Both producers gate emission on `log_active`; subscribe to PLC ZMQ events and react to `(nvh_cmd, gear_id, nvh_id, final_log_trigger)` transitions.
+- **Phase G** (`3a97650`): `LiveSignalChunk` extended to multi-channel; `calibration.py` `scale_v_to_eu()` applies sensor sensitivity + pregain at ingest.
+- **Phase H** (`ff55bdc`): TDMS rollover — new file per `(gear_id, nvh_id)` in the industrial nested folder layout. New `paths.py` helper + persistent trial counter.
+- **Phase I** (`09b3586`): Live Display (gear × direction) results grid populates RMS max / PK max live as chunks arrive.
+- **Phase J** (`61b7f77`): `SummaryDataRow` DB table + `POST /summaries` endpoint; `final_log_trigger` transition persists.
+- **Phase K** (`60e7862`): `IngestContextRow` DB table + NI DataSocket Windows COM bridge (`dashboard_bridge.py`); `POST /ingest-context` and `GET /dashboard-heartbeat` endpoints.
+- **Phase L** (`afec5e4`): `is_reference_accel` on `ChannelRow` + `GET /models/{id}/channels` endpoint.
+- **Phase M** (`d444bfe`): Launcher gets `PlcSourceRow` (Simulator/Siemens S7 pill toggle) and "Dashboard Bridge (NI DataSocket)" fixed row. `docs/labview-integration.md` written.
+
+### Turn — Phase N + Phase O bugs (2026-07-31 05:xx – 14:11 UTC)
+*(Retroactive entry — built in a separate session; exact conversation text not available.)*
+
+**Phase N** (`f845b48`): Dashboard row gets a Simulator / NI DataSocket pill toggle (mirrors `PlcSourceRow`). New `dashboard_simulator.py` script enables Linux / no-DataSocket-runtime end-to-end demos.
+
+**Phase O — nine bug fixes surfaced by self-review + code-review Explore agent** (`9858666`–`af84697`):
+- Bug 1+3: `NvhStateMachine` was emitting three events on first IDLE→START tick, triple-opening the rollover writer. Rogue PLC packets now silently ignored.
+- Bug 2: `_row_stats` accumulator not reset between DCs.
+- Bug 5: `serial_rpt` type inconsistency (`int` vs `str`) across DB and summary schemas — unified as `String`.
+- Bugs 4+6: dashboard heartbeat missing; JSON encoding broken on the DataSocket wire.
+- Bug 7: `try/finally` added to both producer loops so sockets/writers always close on exit.
+- Bug 8: `plc_client` reconnects on ZMQ failures; survives momentary `db_read` dropouts.
+- Bug 9: `POST /summaries` made idempotent (producer retry no longer creates duplicate rows).
+
 ### Turn — "what is pending" / "do all"
 
 **User:** "what is pending" — a status query, not a task.
@@ -1586,6 +1623,27 @@ net-new qt-app tests). Web-frontend typechecks and builds cleanly.
 Updated `PROGRESS.md`, wrote this transcript entry, and pushed as one
 commit -- same "extend the pattern, one edit surface at a time" cadence
 the earlier threshold slice used.
+
+### Turn — 2026-08-01: this account re-enters; plan mode exit + log catch-up
+*(Multiple automated Routine prompt messages fired hourly from `trig_01YC1uzpdcAiUE875c5vMBdR` while plan mode was still active — all blocked from writing files. Summary below covers the full session.)*
+
+**Routine prompt (repeated, blocked):** "Update the conversation record in /home/user/Vibration-Analysis-software-..."
+
+**Assistant:** Plan mode was active (entered during Phase D planning in an earlier session when the account usage limit was approaching). Exited plan mode via `ExitPlanMode` tool.
+
+**User (ExitPlanMode approval):** "already most of the thing are done check the repo"
+
+**Assistant:** Checked repo state. Remote branch was far ahead of local: Phases D–O, M1, Qt UI phases, NI-DAQmx/PLC/TDMS pipeline all complete (252 tests passing, per the other account's most recent PROGRESS.md entry). Local was still at Phase C. Merged the remote, resolving conflicts in both log files — remote content used as base; this session's unique turns inserted before the Phase D new-session entry. Both log files also lacked entries for Phases F–O and the DX housekeeping commits. Committed the merge as `6123dff` and pushed.
+
+### Turn
+**User:** "then"
+
+**Assistant:** Summarised what's remaining beyond M1: (1) write/edit endpoints — the backend today is read-only, creating/editing models, master profiles, limit configs, Table Configs from the GUI is a later slice; (2) AI layer — anomaly detection, root-cause assistant, predictive forecasting (explicitly deferred from the start); (3) real LabVIEW hardware integration — the ZeroMQ wire is already in place, LabVIEW just needs to publish the same JSON shapes on the same socket. Asked what the user wants to work on.
+
+### Turn
+**User (Routine prompt):** "Update the conversation record in /home/user/Vibration-Analysis-software-..."
+
+**Assistant (this update):** Updated CONVERSATION_LOG.md with retroactive entries for the undocumented phases (DX housekeeping, NI-DAQmx source, Phases F–M, Phase N, Phase O bugs) and the current session turns above. Updated PROGRESS.md with the same retroactive entries. Committing and pushing.
 
 ---
 

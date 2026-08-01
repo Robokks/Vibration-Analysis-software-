@@ -6,6 +6,105 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-07-31 14:11 UTC — Phase O: nine production-readiness bug fixes
+**Commits:** `9858666` `b94cb45` `4d7c020` `e36c166` `ea39f95` `ec9056b` `af84697`
+
+*(Retroactive entry — bugs surfaced by self-review + code-review Explore agent after Phase F–N landed.)*
+
+Seven commits fixing nine bugs in the live-acquisition pipeline:
+
+- **Bug 1+3** (`9858666`): `NvhStateMachine.apply()` was emitting three
+  events on the first IDLE→START tick, triple-opening the rollover writer.
+  Fixed the initial-state check. Rogue PLC packets (unknown `nvh_cmd`)
+  now silently ignored instead of crashing.
+- **Bug 2** (`b94cb45`): `_row_stats` accumulator not reset between DCs;
+  each new run now starts from zero.
+- **Bug 5** (`4d7c020`): `serial_rpt` carried as `int` in some paths,
+  `str` in others — unified as `String` across the DB and all summary
+  schemas.
+- **Bugs 4+6** (`e36c166`): dashboard bridge heartbeat was missing; JSON
+  encoding on the NI DataSocket wire was broken.
+- **Bug 7** (`ea39f95`): `try/finally` added around both producer loops
+  so `plc_sub` socket and rollover writer always close cleanly on exit.
+- **Bug 8** (`ec9056b`): `plc_client` now reconnects on ZMQ failures and
+  survives momentary `db_read` dropouts.
+- **Bug 9** (`af84697`): `POST /summaries` now idempotent so a producer
+  retry doesn't create a duplicate summary row.
+
+## 2026-07-31 05:03 UTC — Phase N: Dashboard Source pill toggle (Simulator / NI DataSocket)
+**Commit:** `f845b48`
+
+*(Retroactive entry — built in a separate session.)*
+
+Mirrors `PlcSourceRow`'s Simulator/Siemens-S7 pattern for the dashboard
+row. New `dashboard_simulator.py` script so end-to-end Phase K demos
+work on Linux (no NI DataSocket runtime) and on Windows dev boxes without
+a real dashboard app connected.
+
+## 2026-07-31 04:20 UTC — Phases F–M: full PLC-driven live-acquisition pipeline
+**Commits:** `3b4f324` `bda304b` `3a97650` `ff55bdc` `09b3586` `61b7f77` `60e7862` `afec5e4` `d444bfe`
+
+*(Retroactive entry — built in a separate session. Nine sequential commits, each a self-contained layer.)*
+
+Built the industrial-grade acquisition pipeline that sits between the
+LabVIEW/NI hardware and the FastAPI backend:
+
+- **Phase F** (`3b4f324`, `bda304b`): `NvhStateMachine` + `PlcStateUpdate`
+  schema; both producers (`live_simulator`, `live_daq`) subscribe to PLC
+  ZMQ events and gate emission on `log_active`.
+- **Phase G** (`3a97650`): `LiveSignalChunk` extended to carry multiple
+  named channels; `calibration.py` helper (`scale_v_to_eu`) applies
+  sensor sensitivity + pregain at ingest time.
+- **Phase H** (`ff55bdc`): TDMS rollover creates a new file per
+  `(gear_id, nvh_id)` using the industrial nested folder layout
+  (`YYYY/MM/DD/Trial{N}/{model}/{serial}_{rpt}/…`); new `paths.py`
+  helper + persistent trial counter.
+- **Phase I** (`09b3586`): Live Display (gear × direction) results grid
+  populates RMS max / PK max live as signal chunks arrive.
+- **Phase J** (`61b7f77`): `SummaryDataRow` DB table + `POST /summaries`
+  endpoint; `final_log_trigger` transition persists to the DB.
+- **Phase K** (`60e7862`): `IngestContextRow` DB table + NI DataSocket
+  Windows COM bridge script (`dashboard_bridge.py`); `POST /ingest-context`
+  and `GET /dashboard-heartbeat` endpoints.
+- **Phase L** (`afec5e4`): `is_reference_accel` column on `ChannelRow`
+  + `GET /models/{id}/channels` endpoint.
+- **Phase M** (`d444bfe`): Launcher gets `PlcSourceRow` (Simulator /
+  Siemens S7 pill toggle) and "Dashboard Bridge (NI DataSocket)" fixed
+  row; `docs/labview-integration.md` LabVIEW spec written.
+
+## 2026-07-31 03:14 UTC — NI-DAQmx source + launcher + DMA/TDMS producer
+**Commits:** `1f891c8` `716fdfd` `491a6a6`
+
+*(Retroactive entry — built in a separate session.)*
+
+- **`live_daq.py`** (`1f891c8`): NI-DAQmx continuous acquisition producer
+  — the drop-in replacement for `live_simulator.py` for real NI hardware
+  or the NI MAX simulated device. Publishes the same
+  `LiveTestRunUpdate`/`LiveSignalChunk`/`LiveDcUpdate` ZMQ shapes.
+- **`nvh-launcher`** (`716fdfd`): single PySide6 window replacing the
+  four-terminal startup: Seed Demo Data, Run Analysis Demo, Open Web UI,
+  Live Producer row (Simulation/NI-DAQmx pill toggle).
+- **DMA buffer + TDMS logging** (`491a6a6`): both producers accept
+  `--tdms-path` and `live_daq.py` accepts `--buffer-seconds`
+  (NI-DAQmx DMA buffer size); launcher exposes both as inline controls.
+
+## 2026-07-30 16:37 UTC — Developer-experience: requirements, README, PyCharm fix, launcher
+**Commits:** `06e7b62` `bc9dbaa` `1e16d34` `11a1cda` `ea7f4d3` `d2b90f2` `9ef0fff` `8a194bc`
+
+*(Retroactive entry — built in a separate session.)*
+
+- `requirements.txt` / `requirements-dev.txt` (`06e7b62`, `bc9dbaa`): flat
+  pip-installable dependency lists; local packages in editable mode with
+  correct leaf-first install order.
+- Minimum Python lowered from 3.11 to 3.10 (`1e16d34`).
+- README updates: drop `.venv/bin/` prefix (Windows compatibility)
+  (`11a1cda`); warn about the PyCharm per-subfolder venv trap (`ea7f4d3`);
+  `scripts/fix_pycharm.sh` + `.bat` and `scripts/install_local.sh` + `.bat`
+  added (`d2b90f2`).
+- `nvh-launcher` first version (`9ef0fff`): one PySide6 window to start the
+  demo (Seed + Simulator + Web UI) without four separate terminals.
+  `.gitignore` entry for session-local scratchpad directories (`8a194bc`).
+
 ## 2026-07-30 20:45 UTC — Qt: GUI polish for the PLOT SETUP dialog + Calibration form
 
 User called out that "the rings" (spinbox up/down arrows) weren't
