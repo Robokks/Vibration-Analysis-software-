@@ -1,10 +1,20 @@
 # web-frontend
 
-Vite + React + TypeScript + Tailwind scaffold for the NVH Report GUI web
-client. **GUI scaffolding only — no live data wiring.** Every screen renders
-placeholder content and carries a `TODO:` banner explaining what it wires up
-to once the corresponding backend phase lands (see `PROGRESS.md` at the repo
-root for Phase C–E status).
+Vite + React + TypeScript + Tailwind Report GUI web client. All three
+screens are wired to a live [`../web-backend`](../web-backend) FastAPI
+service:
+- **Master Entry** / **Reports** — real gear teeth, master signatures,
+  limit configs, and Consolidated/Detailed/Summary/Code-Result reports
+  from the seeded demo dataset via REST (`src/lib/api.ts`).
+- **Live Display** — real streaming signal trace + PASS/FAIL stamp via a
+  WebSocket to `/live/ws` (`src/lib/useLiveEvents.ts`), which the backend
+  relays from `../web-backend/scripts/live_simulator.py`'s ZeroMQ
+  producer.
+
+Run the backend + simulator first (see `../web-backend/README.md`), then
+`npm run dev` here. Set `VITE_API_BASE_URL` (defaults to
+`http://localhost:8000`, see `.env.development`) if the backend runs
+somewhere else — the WebSocket URL is derived from it automatically.
 
 ## Design tokens
 

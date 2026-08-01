@@ -16,7 +16,42 @@ matches selectors against a widget's actual class name.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from nvh_design_tokens import load_tokens
+
+# Arrow SVGs are written next to this module so QSS can reference them
+# via a file:// URL. Generated per-palette on demand so the arrow color
+# tracks the theme.
+_ASSETS_DIR = Path(__file__).parent / "assets"
+_ARROW_UP_TEMPLATE = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" '
+    'viewBox="0 0 10 7"><polygon points="5,1 9,6 1,6" fill="{color}"/></svg>'
+)
+_ARROW_DOWN_TEMPLATE = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="7" '
+    'viewBox="0 0 10 7"><polygon points="5,6 9,1 1,1" fill="{color}"/></svg>'
+)
+
+
+def _write_arrow_svgs(color_hex: str) -> tuple[str, str]:
+    """Write arrow_up_<palette>.svg + arrow_down_<palette>.svg with the
+    given color baked in, return (up_path_uri, down_path_uri) as
+    file:// URLs suitable for QSS `image:` properties. Overwrites on
+    every call so palette flips take effect immediately."""
+    _ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    # Slug based on the hex so switching between palettes doesn't step
+    # on itself; also lets both dark + light SVGs coexist on disk.
+    slug = color_hex.lstrip("#").lower()
+    up_path = _ASSETS_DIR / f"arrow_up_{slug}.svg"
+    down_path = _ASSETS_DIR / f"arrow_down_{slug}.svg"
+    up_path.write_text(_ARROW_UP_TEMPLATE.format(color=color_hex))
+    down_path.write_text(_ARROW_DOWN_TEMPLATE.format(color=color_hex))
+    # Qt QSS accepts plain absolute paths in the url("...") of the
+    # image: property; the file:// scheme prefix is unnecessary and
+    # sometimes not recognized by the QSS parser depending on Qt
+    # version. Use forward slashes on all platforms.
+    return up_path.resolve().as_posix(), down_path.resolve().as_posix()
 
 
 def build_stylesheet(palette_name: str = "dark") -> str:
@@ -34,6 +69,15 @@ def build_stylesheet(palette_name: str = "dark") -> str:
     pass_color = palette["pass"]
     graticule = layout["graticuleColor"]
     stroke = layout["graticuleStrokeWidth"]
+    # URL-encoded hex for use inside data:image/svg+xml URIs -- Qt's
+    # QSS parser reads the whole string but `#` is the URL fragment
+    # marker, so we escape it. Palette-aware so the arrows recolor
+    # correctly on the dark/light theme flip.
+    # Concrete SVG arrow assets on disk for the QSS image: property.
+    # QSS's data-URI SVG support is unreliable across Qt versions/plugin
+    # loadouts, but file:// URLs to real SVG files render consistently
+    # via the QtSvg image plugin.
+    arrow_up_url, arrow_down_url = _write_arrow_svgs(accent_secondary)
 
     return f"""
     QWidget {{
@@ -78,6 +122,35 @@ def build_stylesheet(palette_name: str = "dark") -> str:
 
     NavButton:checked {{
         background-color: {background};
+        color: {accent_primary};
+    }}
+
+    QPushButton#ThemeToggle {{
+        background: transparent;
+        border: {stroke}px solid {graticule};
+        border-radius: 4px;
+        padding: 4px 12px;
+        margin-left: 12px;
+        color: {secondary_text};
+        font-family: "{fonts["mono"]}";
+        font-size: 11px;
+    }}
+
+    QPushButton#ThemeToggle:hover {{
+        color: {accent_secondary};
+        border-color: {accent_secondary};
+    }}
+
+    QPushButton#FreqSettingsButton {{
+        background: transparent;
+        border: none;
+        padding: 4px 10px;
+        color: {accent_secondary};
+        font-family: "{fonts["mono"]}";
+        font-size: 11px;
+    }}
+
+    QPushButton#FreqSettingsButton:hover {{
         color: {accent_primary};
     }}
 
@@ -171,5 +244,185 @@ def build_stylesheet(palette_name: str = "dark") -> str:
     QTabBar::tab:selected {{
         background-color: {panel};
         color: {accent_primary};
+    }}
+
+    /* ---- Form controls (used by PLOT SETUP dialog + Calibration screen) ---- */
+
+    QDialog {{
+        background-color: {background};
+    }}
+
+    QGroupBox {{
+        background-color: {panel};
+        border: {stroke}px solid {graticule};
+        border-radius: 4px;
+        margin-top: 14px;
+        padding-top: 14px;
+        color: {accent_primary};
+        font-family: "{fonts["display"]}";
+        font-size: 11px;
+        font-weight: bold;
+    }}
+
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        left: 10px;
+        padding: 0 6px;
+        color: {accent_primary};
+    }}
+
+    QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {{
+        background-color: {background};
+        color: #FFFFFF;
+        border: {stroke}px solid {graticule};
+        border-radius: 3px;
+        padding: 3px 6px;
+        font-family: "{fonts["mono"]}";
+        font-size: 12px;
+        selection-background-color: {accent_secondary};
+        selection-color: {background};
+    }}
+
+    QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus {{
+        border-color: {accent_secondary};
+    }}
+
+    /* Spinbox up/down buttons -- give them a visible plate + real
+       arrow SVGs generated on disk with the palette's accent color
+       baked in. Both dark + light themes get correctly-colored
+       arrows this way. */
+    QDoubleSpinBox, QSpinBox {{
+        padding-right: 22px;
+    }}
+
+    QDoubleSpinBox::up-button, QSpinBox::up-button {{
+        subcontrol-origin: border;
+        subcontrol-position: top right;
+        width: 20px;
+        height: 12px;
+        border-left: {stroke}px solid {graticule};
+        border-bottom: {stroke}px solid {graticule};
+        background-color: {panel};
+    }}
+
+    QDoubleSpinBox::down-button, QSpinBox::down-button {{
+        subcontrol-origin: border;
+        subcontrol-position: bottom right;
+        width: 20px;
+        height: 12px;
+        border-left: {stroke}px solid {graticule};
+        background-color: {panel};
+    }}
+
+    QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover,
+    QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {{
+        background-color: {background};
+    }}
+
+    QDoubleSpinBox::up-arrow, QSpinBox::up-arrow {{
+        image: url("{arrow_up_url}");
+        width: 10px;
+        height: 7px;
+    }}
+
+    QDoubleSpinBox::down-arrow, QSpinBox::down-arrow {{
+        image: url("{arrow_down_url}");
+        width: 10px;
+        height: 7px;
+    }}
+
+    QComboBox::drop-down {{
+        subcontrol-origin: border;
+        subcontrol-position: top right;
+        width: 22px;
+        border-left: {stroke}px solid {graticule};
+        background: transparent;
+    }}
+
+    QComboBox::drop-down:hover {{
+        background-color: {background};
+    }}
+
+    QComboBox::down-arrow {{
+        image: url("{arrow_down_url}");
+        width: 10px;
+        height: 7px;
+    }}
+
+    QComboBox QAbstractItemView {{
+        background-color: {panel};
+        color: #FFFFFF;
+        border: {stroke}px solid {graticule};
+        selection-background-color: {accent_secondary};
+        selection-color: {background};
+        padding: 2px;
+    }}
+
+    QCheckBox {{
+        color: {secondary_text};
+        font-family: "{fonts["mono"]}";
+        font-size: 12px;
+        spacing: 8px;
+    }}
+
+    QCheckBox::indicator {{
+        width: 14px;
+        height: 14px;
+        border: {stroke}px solid {graticule};
+        border-radius: 2px;
+        background-color: {background};
+    }}
+
+    QCheckBox::indicator:checked {{
+        background-color: {accent_secondary};
+        border-color: {accent_secondary};
+    }}
+
+    QFormLayout {{
+        spacing: 8px;
+    }}
+
+    QDialogButtonBox QPushButton {{
+        background-color: {panel};
+        color: #FFFFFF;
+        border: {stroke}px solid {graticule};
+        border-radius: 3px;
+        padding: 5px 16px;
+        font-family: "{fonts["display"]}";
+        font-size: 12px;
+        min-width: 70px;
+    }}
+
+    QDialogButtonBox QPushButton:hover {{
+        border-color: {accent_secondary};
+        color: {accent_secondary};
+    }}
+
+    QDialogButtonBox QPushButton:default {{
+        background-color: {accent_secondary};
+        color: {background};
+        border-color: {accent_secondary};
+    }}
+
+    QDialogButtonBox QPushButton:default:hover {{
+        background-color: {accent_primary};
+        border-color: {accent_primary};
+        color: {background};
+    }}
+
+    QPushButton#CalibrationSave {{
+        background-color: {accent_secondary};
+        color: {background};
+        border: none;
+        border-radius: 3px;
+        padding: 6px 20px;
+        font-family: "{fonts["display"]}";
+        font-size: 12px;
+        font-weight: bold;
+    }}
+
+    QPushButton#CalibrationSave:hover {{
+        background-color: {accent_primary};
     }}
     """

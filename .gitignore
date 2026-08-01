@@ -5,3 +5,9 @@ __pycache__/
 .pytest_cache/
 *.db
 data/
+scratchpad/
+
+# QSS-generated arrow SVGs -- palette-derived, rewritten on every
+# build_stylesheet() call so there's no benefit to versioning them.
+qt-app/src/nvh_qt_app/assets/arrow_up_*.svg
+qt-app/src/nvh_qt_app/assets/arrow_down_*.svg

@@ -67,7 +67,7 @@ def check_value_with_threshold(
     effective_low = entry.limit_low - entry.threshold_low
     effective_high = entry.limit_high + entry.threshold_high
     ok = effective_low <= value <= effective_high
-    return EnvelopeCheckResult(g_level=g_level, ok_flag=ok)
+    return EnvelopeCheckResult(g_level=g_level, ok_flag=ok, low=effective_low, high=effective_high)
 
 
 def grade_dc_record_with_limits(

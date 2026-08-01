@@ -1,0 +1,9 @@
+# Dev-only tooling. Install after `pip install -r requirements.txt`
+# to enable the cross-package pytest suite.
+
+# Test runner
+pytest>=8.0
+
+# Runtime deps still needed (pulled by the main file transitively,
+# but listed here too so a fresh dev install doesn't miss anything).
+-r requirements.txt

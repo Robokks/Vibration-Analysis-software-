@@ -3,6 +3,7 @@ conftest.py sets automatically) and checks navigation switches screens
 without crashing. Not a visual regression test — just "does it come up."
 """
 
+from nvh_qt_app.screens.calibration import CalibrationScreen
 from nvh_qt_app.screens.live_display import LiveDisplayScreen
 from nvh_qt_app.screens.master_entry import MasterEntryScreen
 from nvh_qt_app.screens.reports import ReportsScreen
@@ -17,13 +18,14 @@ class BuildStylesheetTests:
 
 
 class MainWindowTests:
-    def test_starts_on_live_display_and_holds_three_screens(self, qapp):
+    def test_starts_on_live_display_and_holds_four_screens(self, qapp):
         window = MainWindow()
-        assert window._stack.count() == 3
+        assert window._stack.count() == 4
         assert window._stack.currentIndex() == 0
         assert isinstance(window._stack.widget(0), LiveDisplayScreen)
         assert isinstance(window._stack.widget(1), MasterEntryScreen)
         assert isinstance(window._stack.widget(2), ReportsScreen)
+        assert isinstance(window._stack.widget(3), CalibrationScreen)
 
     def test_nav_buttons_switch_the_visible_screen(self, qapp):
         window = MainWindow()

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Report GUI web frontend for the NVH EOL test system (scaffold only, no live API wiring yet)",
+  "description": "Report GUI web frontend for the NVH EOL test system (Master Entry/Reports wired to nvh-web-backend; Live Display still a placeholder)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

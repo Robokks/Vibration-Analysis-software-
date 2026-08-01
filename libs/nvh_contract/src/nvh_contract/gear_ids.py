@@ -18,11 +18,17 @@ GEAR_ID_TO_LABEL: dict[int, str] = {
 GEAR_LABEL_TO_ID: dict[str, int] = {label: gear_id for gear_id, label in GEAR_ID_TO_LABEL.items()}
 
 
-def gear_label_from_id(gear_id: int) -> str:
-    try:
-        return GEAR_ID_TO_LABEL[gear_id]
-    except KeyError:
-        raise ValueError(f"unknown gear_id {gear_id!r}") from None
+def gear_label_from_id(gear_id: int) -> str | None:
+    """None for any unknown gear_id (including the -1 idle sentinel).
+
+    Symmetric with `direction_from_nvh_id` in `state.py`. The PLC's
+    `gear_id` hot-path can carry a bit-flip or bogus value; the
+    producer's chunk-emit guard checks `sm.gear_label is not None`
+    to short-circuit before any downstream code runs. Callers that
+    truly need a raising lookup (LabVIEW-facing ingestion adapters
+    that must validate at ingest) can still use `gear_id_from_label`
+    for the reverse or `GEAR_ID_TO_LABEL[gear_id]` directly."""
+    return GEAR_ID_TO_LABEL.get(gear_id)
 
 
 def gear_id_from_label(gear_label: str) -> int:

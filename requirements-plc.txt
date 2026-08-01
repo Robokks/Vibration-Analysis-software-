@@ -1,0 +1,14 @@
+# PLC integration -- OPTIONAL. Install only if the NVH app needs to
+# read gear_id / nvh_id / start-stop / final-log-trigger from a real
+# Siemens S7-family PLC (S7-300/400/1200/1500). Not required for the
+# `plc_simulator.py` fallback, which uses a pure-Python scripted
+# sequence.
+#
+# python-snap7 wraps the C snap7 library. On Windows the wheel ships
+# with the DLL. On Linux you need `libsnap7-dev` installed system-wide
+# (or the .so on LD_LIBRARY_PATH).
+#
+# Usage:
+#   pip install -r requirements-plc.txt
+
+python-snap7>=2.0

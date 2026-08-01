@@ -1,11 +1,19 @@
 # qt-app
 
-PySide6 scaffold for the NVH Report GUI desktop client. **GUI scaffolding
-only — no live data wiring.** Every screen renders placeholder content and
-carries a `TODO:` banner explaining what it wires up to once the
-corresponding backend phase lands (see `PROGRESS.md` at the repo root for
-Phase C–E status). Screens mirror `../web-frontend`'s Live Display / Master
-Entry / Reports.
+PySide6 Report GUI desktop client. All three screens are wired to a live
+[`../web-backend`](../web-backend) FastAPI service:
+- **Master Entry** / **Reports** — REST via `api_client.py`, built on
+  `QNetworkAccessManager` so requests never block the UI thread.
+- **Live Display** — streaming signal trace + PASS/FAIL stamp via
+  `QWebSocket`, wrapped in `live_client.py` (same async, callback-based
+  shape as the REST client). The trace overpaints a rolling buffer on
+  top of the existing graticule widget (`widgets/signal_trace.py`).
+
+Both use the same visual language derived from `../design-tokens` and
+the same API contract as `../web-frontend`. Run the backend + live
+simulator first (see `../web-backend/README.md`, defaults to
+`http://127.0.0.1:8000` + ZeroMQ `tcp://127.0.0.1:5555`, matching this
+app's own defaults) before launching.
 
 ## Design tokens
 

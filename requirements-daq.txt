@@ -1,0 +1,20 @@
+# NI-DAQmx integration -- OPTIONAL. Install only if you plan to acquire
+# from real NI hardware or a NI MAX simulated device via
+# `web-backend/scripts/live_daq.py`.
+#
+# Requires the NI-DAQmx driver to be installed system-wide first
+# (download from ni.com). On Windows this also enables NI MAX where you
+# create simulated devices; on Linux the driver is available but there's
+# no NI MAX -- you'd need a real device.
+#
+# Usage:
+#   pip install -r requirements-daq.txt
+
+nidaqmx>=1.0
+
+# Pure-Python TDMS reader/writer. Used by live_simulator.py --tdms-path
+# so both producers can log to the same NI-standard file format
+# regardless of whether real NI hardware is present. Also enables
+# reading TDMS files produced by live_daq.py or LabVIEW for
+# post-acquisition analysis.
+nptdms>=1.7

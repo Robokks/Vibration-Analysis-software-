@@ -31,6 +31,8 @@ def test_check_value_with_threshold_boundary_inclusive_at_limit():
 
     result = check_value_with_threshold(entry, entry.limit_low)
     assert result.ok_flag is True
+    assert result.low == pytest.approx(entry.limit_low - entry.threshold_low)
+    assert result.high == pytest.approx(entry.limit_high + entry.threshold_high)
 
 
 def test_check_value_with_threshold_fails_just_below_limit_when_threshold_zero():

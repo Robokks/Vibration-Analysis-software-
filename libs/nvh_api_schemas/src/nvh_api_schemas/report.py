@@ -37,6 +37,8 @@ class SlippageOut(BaseModel):
 class EnvelopeCheckOut(BaseModel):
     g_level: int
     ok_flag: bool
+    low: float
+    high: float
 
 
 class GradingSummaryOut(BaseModel):
@@ -115,3 +117,20 @@ class SummaryReportOut(BaseModel):
     rows: list[SummaryRowOut]
     xchart: XChartOut
     histogram: HistogramOut
+
+
+class CodeResultRowOut(BaseModel):
+    step: int
+    gear_direction: str
+    channel_name: str
+    parameter: str
+    orders: float | None = None
+    low: float
+    high: float
+    actual: float
+    unit: str
+    ok_flag: bool
+
+
+class CodeResultReportOut(BaseModel):
+    rows: list[CodeResultRowOut]

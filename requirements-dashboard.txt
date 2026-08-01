@@ -1,0 +1,12 @@
+# Dashboard integration -- OPTIONAL, Windows only. Install if you're
+# running the dashboard app that talks to NVH via NI DataSocket.
+#
+# NI DataSocket is an ActiveX (COM) object with no pure-Python binding;
+# pywin32's win32com.client is the bridge. Requires the NI DataSocket
+# runtime installed system-wide (bundled with LabVIEW or downloadable
+# separately from ni.com).
+#
+# Usage (on Windows):
+#   pip install -r requirements-dashboard.txt
+
+pywin32; sys_platform == "win32"

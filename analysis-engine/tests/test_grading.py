@@ -39,9 +39,12 @@ def test_classify_g_level_picks_nearest_band():
 
 def test_check_value_ok_within_default_g4_g6_window():
     master = build_master_signature([1.0, 1.2, 0.9, 1.1], full_scale=10.0)
+    ladder = compute_g_ladder(master.mean_value, master.band_min, master.band_max, master.full_scale)
     result_ok = check_value(master, master.mean_value)
     assert result_ok.g_level == 5
     assert result_ok.ok_flag is True
+    assert result_ok.low == pytest.approx(ladder.g_level_value(4))
+    assert result_ok.high == pytest.approx(ladder.g_level_value(6))
 
 
 def test_check_value_nok_outside_window():

@@ -7,6 +7,8 @@ from nvh_contract.db import (
     LimitConfigRow,
     MasterProfileRow,
     ModelRow,
+    TableConfigParameterRow,
+    TableConfigStepRow,
     TestRunRow,
     init_db,
     make_engine,
@@ -180,3 +182,76 @@ def test_limit_config_row_duplicate_key_conflicts(tmp_path):
         session.add(_row())
         with pytest.raises(IntegrityError):
             session.commit()
+
+
+def test_table_config_step_row_roundtrip(tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path}/test.db")
+    init_db(engine)
+    Session = make_session_factory(engine)
+
+    with Session() as session:
+        _seed_model(session, "MODEL-A")
+        session.add(
+            TableConfigStepRow(
+                model_id="MODEL-A", program_name="REVA", gear_label="R", direction="RU",
+                channel_name="vib_a", step_order=1, updated_at="2026-07-29T00:00:00",
+            )
+        )
+        session.commit()
+
+    with Session() as session:
+        row = session.get(TableConfigStepRow, ("MODEL-A", "REVA", "R", "RU", "vib_a"))
+        assert row is not None
+        assert row.step_order == 1
+
+
+def test_table_config_step_row_merge_upserts_in_place(tmp_path):
+    # This is the exact idempotency property seed_demo_data.py depends on
+    # (see the historical LimitConfigRow add()-vs-merge() bug in PROGRESS.md).
+    engine = make_engine(f"sqlite:///{tmp_path}/test.db")
+    init_db(engine)
+    Session = make_session_factory(engine)
+
+    with Session() as session:
+        _seed_model(session, "MODEL-A")
+        session.merge(
+            TableConfigStepRow(
+                model_id="MODEL-A", program_name="REVA", gear_label="R", direction="RU",
+                channel_name="vib_a", step_order=1, updated_at="2026-07-29T00:00:00",
+            )
+        )
+        session.commit()
+
+    with Session() as session:
+        session.merge(
+            TableConfigStepRow(
+                model_id="MODEL-A", program_name="REVA", gear_label="R", direction="RU",
+                channel_name="vib_a", step_order=2, updated_at="2026-07-29T01:00:00",
+            )
+        )
+        session.commit()
+
+    with Session() as session:
+        row = session.get(TableConfigStepRow, ("MODEL-A", "REVA", "R", "RU", "vib_a"))
+        assert row.step_order == 2
+        assert row.updated_at == "2026-07-29T01:00:00"
+
+
+def test_table_config_parameter_row_roundtrip(tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path}/test.db")
+    init_db(engine)
+    Session = make_session_factory(engine)
+
+    with Session() as session:
+        _seed_model(session, "MODEL-A")
+        session.add(
+            TableConfigParameterRow(
+                model_id="MODEL-A", program_name="REVA", channel_name="vib_a",
+                stat_name="RMS Avg", updated_at="2026-07-29T00:00:00",
+            )
+        )
+        session.commit()
+
+    with Session() as session:
+        row = session.get(TableConfigParameterRow, ("MODEL-A", "REVA", "vib_a", "RMS Avg"))
+        assert row is not None
