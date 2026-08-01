@@ -1624,6 +1624,57 @@ Updated `PROGRESS.md`, wrote this transcript entry, and pushed as one
 commit -- same "extend the pattern, one edit surface at a time" cadence
 the earlier threshold slice used.
 
+### Turn — 2026-08-01 ~04:29 UTC: Routine fires; plan mode persisted; write/edit endpoints
+
+**Routine prompt (from `trig_01YC1uzpdcAiUE875c5vMBdR`):** "Update the conversation record in /home/user/Vibration-Analysis-software- (branch claude/nvh-software-python-28zib3) with everything new since the last update..."
+
+**Assistant:** Checked system state. Plan mode was still active — it had persisted across the context compaction from the prior session. Previous session had edited both `CONVERSATION_LOG.md` and `PROGRESS.md` with retroactive entries (DX housekeeping, NI-DAQmx source, Phases F–O) but had not yet committed those changes. Before any file writes were possible, called `ExitPlanMode` (had to load the tool schema via `ToolSearch` first since it was deferred). Plan mode exited successfully.
+
+With plan mode cleared, `git status` confirmed the two files had uncommitted staged edits. Committed them as `3b27449` ("docs: sync conversation log and progress through Aug 1 session") and pushed to `origin/claude/nvh-software-python-28zib3`.
+
+Simultaneously (mid-turn, arrived while committing), the user sent:
+
+**User (mid-turn):** "do Write/edit endpoints"
+
+**Assistant:** Treated this as immediate instruction to implement the missing write/create/delete backend endpoints. The backend was read-only (except for three PATCH endpoints for threshold/limit/table-config-parameter toggle) — operators could not create new models, programs, or limit configs from the GUI. Explored the codebase to build a full inventory of what existed vs what was missing, then implemented the following:
+
+*New schemas in `libs/nvh_api_schemas/src/nvh_api_schemas/catalog.py`:*
+- `ModelCreate` — body for `POST /models` (all gear-teeth + ratios fields, model_id in body)
+- `ModelUpdate` — body for `PUT /models/{id}` (same fields minus model_id, which is path-only)
+- `MasterProfileCreate` — body for `POST .../programs` (just `program_name`)
+- `LimitConfigCreate` — body for `POST .../limit-configs` (upsert a single row; all LIMIT+THRESHOLD fields)
+- `TableConfigStepOut` — response shape for table config step
+- `TableConfigStepUpsert` — body for `PUT .../table-config/steps`
+
+*New service functions in `web-backend/src/nvh_web_backend/catalog_service.py`:*
+- `create_model` / `update_model` / `delete_model`
+- `create_master_profile` / `delete_master_profile` (delete cascades limit configs, step rows, parameter rows)
+- `import_limit_configs_from_master_signatures` — the "Import From MASTER" button backend: seeds or refreshes `LimitConfigRow`s from `MasterSignatureRow.band_min/band_max`, preserving any existing THRESHOLD values
+- `create_or_replace_limit_config` — upsert a single limit config entry
+- `delete_limit_config_row`
+- `upsert_table_config_step` / `delete_table_config_step`
+
+*New endpoints in `web-backend/src/nvh_web_backend/routers/models.py` (10 new routes):*
+```
+POST   /models                                                 → create model (201)
+PUT    /models/{id}                                            → full-field update
+DELETE /models/{id}                                            → delete (204)
+POST   /models/{id}/programs                                   → create NVH program (201)
+DELETE /models/{id}/programs/{name}                            → delete program (204, cascades)
+POST   /models/{id}/programs/{name}/import-from-master         → seed limits from master
+POST   /models/{id}/programs/{name}/limit-configs              → create/upsert limit config (201)
+DELETE /models/{id}/programs/{name}/limit-configs/{stat}       → delete limit config (204)
+GET    /models/{id}/programs/{name}/table-config/steps         → list steps
+PUT    /models/{id}/programs/{name}/table-config/steps         → upsert step
+DELETE /models/{id}/programs/{name}/table-config/steps         → delete step (204)
+```
+
+Also added `_load_program_row` helper (404 on unknown program) alongside the existing `_load_model_row`. Added 28 new tests to `web-backend/tests/test_models_router.py` covering all happy paths and 404/409 error cases. Full suite: **291 passed, 2 skipped** (the 2 skips are pre-existing Windows-only NI-DAQmx/DataSocket tests).
+
+Committed as `d5e5de6` ("feat: add write/edit endpoints for models, programs, limit configs, and table config steps") and pushed.
+
+---
+
 ### Turn — 2026-08-01: this account re-enters; plan mode exit + log catch-up
 *(Multiple automated Routine prompt messages fired hourly from `trig_01YC1uzpdcAiUE875c5vMBdR` while plan mode was still active — all blocked from writing files. Summary below covers the full session.)*
 

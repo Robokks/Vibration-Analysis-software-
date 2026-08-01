@@ -6,6 +6,35 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-08-01 03:49 UTC — Write/edit endpoints for models, programs, limit configs, table config steps
+**Commit:** `d5e5de6`
+
+10 new REST endpoints close the gap between the read-only backend and what
+the GUI needs to create and configure NVH test setups:
+
+- `POST /models`, `PUT /models/{id}`, `DELETE /models/{id}` — full model CRUD
+- `POST .../programs`, `DELETE .../programs/{name}` — NVH-program management (delete cascades all dependent limit configs and table config rows)
+- `POST .../import-from-master` — "Import From MASTER" button backend: seeds `LIMIT_LOW/HIGH` from `band_min/band_max`, preserves any existing `THRESHOLD` values
+- `POST .../limit-configs`, `DELETE .../limit-configs/{stat}` — individual limit-config row upsert/delete
+- `GET/PUT/DELETE .../table-config/steps` — full CRUD for the step-ordering rows
+
+New schemas: `ModelCreate`, `ModelUpdate`, `MasterProfileCreate`, `LimitConfigCreate`, `TableConfigStepOut`, `TableConfigStepUpsert` in `nvh_api_schemas.catalog`.
+New service layer functions in `catalog_service.py`. 28 new tests added; full suite: **291 passed, 2 skipped**.
+
+---
+
+## 2026-08-01 03:38 UTC — Log sync and plan-mode exit
+**Commit:** `3b27449`
+
+Retroactive PROGRESS.md + CONVERSATION_LOG.md entries added for DX housekeeping
+(commits `06e7b62`–`9ef0fff`), NI-DAQmx source (`1f891c8` `716fdfd` `491a6a6`),
+Phases F–M PLC pipeline (`3b4f324`–`d444bfe`), Phase N dashboard pill toggle
+(`f845b48`), and Phase O nine bug fixes (`9858666`–`af84697`). Plan mode that
+had been left active from a prior session was exited before the commit could
+proceed.
+
+---
+
 ## 2026-07-31 14:11 UTC — Phase O: nine production-readiness bug fixes
 **Commits:** `9858666` `b94cb45` `4d7c020` `e36c166` `ea39f95` `ec9056b` `af84697`
 
