@@ -1702,6 +1702,195 @@ Committed as `d5e5de6` ("feat: add write/edit endpoints for models, programs, li
 
 **Assistant:** Asked the user to describe what they found in detail — which screen or feature was broken, what happened vs what was expected, and whether they were running against the simulator or real NI-DAQmx hardware — so the root cause could be found and fixed rather than guessing.
 
+### Turn — 2026-08-02: Master Entry GUI — create/edit dialogs plan
+
+**User:** "create plan save it repo / my another account do the work"
+
+**Assistant (this session — Sonnet 4.6, session 01Sttp8EM7N79zDNwwhqqa8K):** Explored
+the existing `master_entry.py` and `api_client.py` to map what was missing. The
+`MasterEntryScreen` had hardcoded `MODEL_ID`/`PROGRAM_NAME`/`GEAR_LABEL`/`DIRECTION`
+constants and no way to create models, programs, or edit gear teeth from the UI.
+The `ApiClient` lacked all write-verb methods (`_post`, `_put`, `_delete`) and the
+five endpoint methods the plan would need. Wrote the full implementation plan to
+`docs/plan-master-entry-gui.md` covering:
+- New `_build_selectors_panel()` with Model combo + "+" button, Program combo + "+"
+  button, Direction combo, and Import-from-master button.
+- Three async dialog classes (`_NewModelDialog`, `_NewProgramDialog`, `_GearDialog`)
+  following the same async `open()` pattern as `CalibrationScreen`.
+- `ApiClient` additions: `_post`/`_put`/`_delete` transports, and five write methods
+  (`post_model`, `put_model`, `post_program`, `delete_program`, `post_import_from_master`).
+- Cascade signal wiring so `_on_model_selector_changed` drives programs and
+  `_on_program_selector_changed` refreshes the parameter table.
+
+Committed the plan as `b323268` and handed off to the other account for implementation.
+
+### Turn — 2026-08-02: Master Entry GUI — implementation (other account)
+
+*(This turn was executed by a separate Claude Opus 4.7 session, session
+`01S7JfnA26aJxtXbi7dt4Si6`. Recorded here for completeness; verbatim reply text
+is not available.)*
+
+The Opus 4.7 session implemented the full plan from `docs/plan-master-entry-gui.md`:
+
+**`qt-app/src/nvh_qt_app/api_client.py`** — added `QByteArray` import; new `_post`,
+`_put`, `_delete` transport methods following the same `sendCustomRequest` pattern as
+`_patch`; extended `_track()` to succeed with `None` on empty responses (204 from
+DELETE endpoints); added `post_model`, `put_model`, `post_program`, `delete_program`,
+`post_import_from_master` endpoint methods.
+
+**`qt-app/src/nvh_qt_app/screens/master_entry.py`** — removed hardcoded module-level
+constants; new `_build_selectors_panel()` returning a `QFormLayout` with three rows
+(Model combo + "+", Program combo + "+", Direction combo + Import button); gear table
+gains Add / Edit gear buttons; full async cascade (`_on_models_loaded` →
+`_on_model_selector_changed` → `_on_programs_loaded` → `_on_program_selector_changed`
+→ `_refresh_parameter_table`) with `blockSignals` guards; three inner dialog classes
+(`_NewModelDialog`, `_NewProgramDialog`, `_GearDialog`) all following the async
+`open()` pattern: OK fires the API call, `self.accept()` runs in the success callback,
+failures leave the dialog open; `_GearDialog._on_ok` builds a full `ModelUpdate` body
+(not a partial patch) by copying all ten fields from `self._current_model`.
+
+**`qt-app/tests/test_master_entry.py`** — `_fake()` helper primes the cascade;
+`test_shows_error_status_on_backend_failure` retargeted to `fetch_models`;
+`test_add_gear_button_posts_full_model_update` asserts every `ModelUpdate` field is
+present and new gear is merged (not replacing) existing dicts.
+
+Full test suite: **350 passed**. Committed as `766cf26`.
+
+### Turn — 2026-08-02: Reports screen — cascade filter + D-report layout plan
+
+**User:** "left side cascade filter will be there / after full graph with tabs then table also / like live display but able will be in the another tab / top side general details will be there / one more filter / gear selection and nvh id selection"
+
+**Assistant:** Noted that this expanded the earlier plan (which had only the Model→Date→
+Serial→Rpt cascade and Summary multi-serial tab). The user's message adds:
+1. A **left panel** with fixed-width ~220px containing the full cascade
+2. A **general details strip** at the top of the content area (Model, Serial, Rpt,
+   Date, Start, End, PASS/FAIL stamp)
+3. Tabs structured exactly like Live Display but with a "Detailed" table in a separate
+   tab rather than below the graphs
+4. A second cascade layer: **Gear selector** → **NVH ID selector** mapping to which
+   `dc_record` to view (one dc_record per gear+direction combination within a TestRun)
+
+Rewrote the plan in `docs/plan-reports-cascade-filter.md` (committed as `e6bb8c7`)
+covering:
+
+**Screen layout** (QHBoxLayout: left panel + right QVBoxLayout):
+```
+┌──────────────────┬───────────────────────────────────────────────────────┐
+│ LEFT PANEL 220px │ GENERAL DETAILS STRIP (Model / Serial / Rpt / Date /  │
+│                  │  Start / End / PASS-FAIL stamp)                        │
+│ Test run         │                                                        │
+│  Model  [combo]  │ QTabWidget:                                            │
+│  Date   [combo]  │   "Graphs"      → order spectrum + order tracking      │
+│  Serial [combo]  │   "Detailed"    → per-stat table                       │
+│  Rpt No [combo]  │   "NVH Details" → per-condition code-result table      │
+│                  │   "Summary"     → multi-serial X-chart                 │
+│ Condition        │                                                        │
+│  Gear   [combo]  │                                                        │
+│  NVH ID [combo]  │                                                        │
+│                  │                                                        │
+│ Report context   │                                                        │
+│  Program [combo] │                                                        │
+│  Dir.   [combo]  │                                                        │
+└──────────────────┴───────────────────────────────────────────────────────┘
+```
+
+**Cascade flow:**
+```
+fetch_models() → _model_combo
+  _on_model_changed() → fetch_programs + fetch_test_runs + fetch_summaries
+    _on_runs_loaded() → _all_runs → _date_combo
+      _on_date_changed() → _serial_combo
+        _on_serial_changed() → _rpt_combo
+          _on_rpt_changed() → fetch_test_run(test_run_id)
+            _on_test_run_detail() → update details strip + _gear_combo
+              _on_gear_changed() → _nvh_id_combo
+                _on_nvh_id_changed() → fetch consolidated + detailed + code_result
+    _on_summaries_loaded() → _serial_list (Summary tab)
+```
+
+**Key domain note:** `GET /test-runs/{id}` returns `TestRunDetail` with a nested
+`test_run` object, not a flat dict — the handler must read `detail["test_run"]` for
+`serial_number`, `started_at`, etc. (Only `dc_records` is at the top level.)
+
+The plan also noted `MultiSeriesPlot` needed `add_series(name)` / `remove_series(name)`
+for the dynamic multi-serial Summary X-chart, and `fetch_summaries(model_id)` needed
+to be added to `ApiClient`.
+
+### Turn — 2026-08-02: Reports screen — cascade filter implementation
+
+**User:** *(approved plan, ExitPlanMode)*
+
+**Assistant:** Implemented the full plan in one commit (`5649198`):
+
+- **`qt-app/src/nvh_qt_app/api_client.py`** — added `fetch_summaries(model_id)` calling
+  `GET /summaries?model_id=X`.
+
+- **`qt-app/src/nvh_qt_app/widgets/multi_series_plot.py`** — added `add_series(name)`
+  (allocates a new `SeriesConfig` with the next default color, no-op if already exists)
+  and `remove_series(name)` (pops from `_series` dict, calls `self.update()`).
+
+- **`qt-app/src/nvh_qt_app/screens/reports.py`** — full rewrite (~350 lines):
+  - Removed module-level constants `MODEL_ID`, `PROGRAM_NAME`, `GEAR_LABEL`,
+    `DIRECTION`, `SUMMARY_STAT_NAME`.
+  - New instance vars: `_model_id`, `_program_name`, `_direction`, `_all_runs`,
+    `_all_summaries`, `_current_dc_records`, `_code_result_rows`.
+  - `_build_filter_panel()`: `Panel` fixed-width 220px, three `SectionTitle` sections
+    (Test run / Condition / Report context), 8 QComboBoxes, all signal-wired.
+  - `_build_details_strip()`: horizontal strip with 6 `MonoLabel`s + `StampWidget`
+    placeholder for the PASS/FAIL stamp.
+  - `_build_graphs_tab()`: returns `(panel, spec_plot, track_plot, detail_label)` —
+    order spectrum + order tracking side-by-side.
+  - `_build_summary_tab()`: stat QComboBox + `QListWidget(MultiSelection)` + `MultiSeriesPlot`.
+  - Full cascade logic with `blockSignals` guards throughout.
+  - `_filter_nvh_details_table()`: client-side gear filter on the NVH Details table.
+  - `_on_summaries_loaded()`: reads `serial_no` field (not `serial_number`) from the
+    `/summaries` endpoint's `SummaryDataOut` shape.
+
+- **`docs/plan-reports-cascade-filter.md`** — rewritten with D-report layout diagram,
+  Gear/NVH ID cascade details, and manual checklist.
+
+### Turn — 2026-08-02: screenshot request
+
+**User:** "screenshot"
+
+**Assistant:** Started the backend (`uvicorn "nvh_web_backend.app:create_app" --factory
+--port 8000`), seeded demo data, resolved missing system libraries (`libegl1`,
+`libxcb-cursor0`, `libxkbcommon-x11-0`, `libxcb-icccm4`, `libxcb-keysyms1`,
+`libxcb-shape0`, `libxcb-xkb1`), launched Xvfb on `:99`, started the Qt app
+(`DISPLAY=:99 .venv/bin/python -m nvh_qt_app`), clicked the Reports nav button with
+`xdotool`, and captured a screenshot.
+
+The screenshot confirmed the new layout was rendering correctly:
+- Left panel: Model=MODEL-A, Date=All, Serial No=DEMO-CRASH-NOISE-UNIT,
+  Rpt No=Rpt 1 (2026-08-02T04:56), Gear=All, NVH ID=R-RU, Program=REVA, Direction=RU
+- Graphs tab: detail text (gear R / RU / CRASH_NOISE DETECTED), ORDER SPECTRUM plot,
+  ORDER TRACKING plot — both populated with real analysis-engine data from a FAIL run.
+- Details strip showed `Serial: — / Rpt: — / Date:` blank — because `GET /test-runs/{id}`
+  returns a `TestRunDetail` with `serial_number` etc. nested under a `test_run` key,
+  but the handler was reading them from the top level of the dict. Diagnosed as a
+  field-access bug.
+
+### Turn — 2026-08-02: details strip bug fix
+
+**User:** *(continuation — bug identified in details strip from screenshot)*
+
+**Assistant:** Fixed `_on_test_run_detail` to read `detail.get("test_run") or detail`
+first, then pull `serial_number`, `repeat_number`, `started_at`, `finished_at`,
+`overall_result` from that nested object. The fallback `or detail` handles any future
+API shape changes gracefully. Restarted the Qt app, took a second screenshot showing
+the details strip now populated, committed as `02421d4` and pushed.
+
+### Turn — 2026-08-02: conversation log + progress update
+
+**User:** "Update the conversation record in /home/user/Vibration-Analysis-software- (branch claude/nvh-software-python-28zib3) with everything new since the last update. This has two files with different jobs..."
+
+**Assistant (this session):** Read `CONVERSATION_LOG.md` and `PROGRESS.md` to identify
+the last recorded state (Aug 1 bug-report turn / `d5e5de6` progress entry). Identified
+5 new commits since then. Planned and appended entries for all Aug 2 activity — Master
+Entry GUI plan and implementation (plan by this session, implementation by Opus 4.7),
+Reports cascade filter plan + implementation + details-strip bug fix — to both files.
+Committed as this entry's commit and pushed.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)

@@ -6,6 +6,84 @@ at the top. Updated at regular intervals as work continues.
 
 ---
 
+## 2026-08-02 05:04 UTC — fix(reports): details strip reads from nested test_run
+**Commit:** `02421d4`
+
+`GET /test-runs/{id}` returns `TestRunDetail` with `serial_number`, `started_at`,
+`finished_at`, `overall_result` nested under a `test_run` key — only `dc_records`
+is at the top level. `_on_test_run_detail` was reading the run fields directly
+from the top-level dict, so the general details strip (Serial / Rpt / Date / Start
+/ End) always showed `—`. Fixed by reading `detail.get("test_run") or detail` first.
+
+---
+
+## 2026-08-02 04:32 – 04:54 UTC — Reports screen: cascade filter + D-report layout
+**Commits:** `e6bb8c7` `5649198`
+
+Complete rewrite of `reports.py` with new layout matching the real LabVIEW D-report:
+
+**Layout:**
+- Left panel (220px fixed): cascade filter (Model → Date → Serial → Rpt No → Gear →
+  NVH ID) + Program / Direction report-context combos.
+- General details strip at top of content area: Model, Serial, Rpt, Date, Start,
+  End, PASS/FAIL stamp (populated from `GET /test-runs/{id}` detail).
+- Four tabs: **Graphs** (order spectrum + order tracking side-by-side), **Detailed**
+  (per-stat table), **NVH Details** (per-condition code-result table), **Summary**
+  (multi-serial X-chart with serial list + stat combo).
+
+**Cascade logic (all client-side after two API calls):**
+- Model → Date → Serial → Rpt No → `fetch_test_run` → `dc_records` → Gear → NVH ID
+  → `fetch_consolidated` + `fetch_detailed` + `fetch_code_result`.
+- Gear combo also filters the NVH Details table rows by `gear_direction` prefix.
+- Summary tab: `fetch_summaries(model_id)` → serial list → `add_series`/`remove_series`
+  on `MultiSeriesPlot` as serials are selected/deselected.
+
+**Other changes:**
+- `api_client.py`: added `fetch_summaries(model_id)`.
+- `multi_series_plot.py`: added `add_series(name)` and `remove_series(name)` for
+  dynamic series management (Summary tab needs to add/remove per-serial lines).
+- Removed hardcoded `MODEL_ID` / `PROGRAM_NAME` / `GEAR_LABEL` / `DIRECTION` constants.
+
+Implementation plan: `docs/plan-reports-cascade-filter.md` (`e6bb8c7`).
+
+---
+
+## 2026-08-02 03:52 – 04:06 UTC — Master Entry GUI: dynamic selectors + create/edit dialogs
+**Commits:** `b323268` (plan) `766cf26` (implementation by Claude Opus 4.7, session 01S7JfnA26aJxtXbi7dt4Si6)
+
+Operators can now create models, add/edit gears, add programs, and import limit rows
+from master signatures — all without leaving the Qt desktop app.
+
+**`api_client.py`:**
+- `QByteArray` added to imports (needed for empty-body DELETE requests).
+- New `_post`, `_put`, `_delete` transport methods (same `sendCustomRequest` pattern
+  as `_patch`).
+- `_track()` extended to succeed with `None` on 204 No Content so DELETE responses
+  don't blow up `json.loads`.
+- Five new write-endpoint methods: `post_model`, `put_model`, `post_program`,
+  `delete_program`, `post_import_from_master`.
+
+**`master_entry.py`:**
+- Removed hardcoded module-level `MODEL_ID` / `PROGRAM_NAME` / `GEAR_LABEL` /
+  `DIRECTION` constants.
+- New `_build_selectors_panel()`: Model combo + "+" button, Program combo + "+"
+  button, Direction combo, Import-from-master button.
+- Add gear / Edit gear buttons added to the gear table row.
+- Three async dialog classes (`_NewModelDialog`, `_NewProgramDialog`, `_GearDialog`)
+  following the async `open()` pattern: OK fires the API call, `self.accept()` runs
+  in the success callback; failures leave the dialog open with the error on the status
+  label.
+- `_GearDialog._on_ok` builds a full `ModelUpdate` body (not a partial patch) so the
+  backend PUT doesn't lose non-gear fields.
+
+**`test_master_entry.py`:** new `_fake()` helper; `test_add_gear_button_posts_full_model_update`
+asserts every `ModelUpdate` field is present and the new gear is merged into the
+existing dicts.
+
+Full test suite: **350 passed**. Implementation plan: `docs/plan-master-entry-gui.md`.
+
+---
+
 ## 2026-08-01 03:49 UTC — Write/edit endpoints for models, programs, limit configs, table config steps
 **Commit:** `d5e5de6`
 
