@@ -361,11 +361,12 @@ class ReportsScreen(QWidget):
     def _on_test_run_detail(self, detail: dict) -> None:
         self._current_dc_records = detail.get("dc_records") or []
 
-        serial = detail.get("serial_number", "—")
-        rpt = detail.get("repeat_number", "—")
-        started = detail.get("started_at") or ""
-        finished = detail.get("finished_at") or ""
-        overall = detail.get("overall_result", "")
+        run = detail.get("test_run") or detail  # graceful fallback if shape changes
+        serial = run.get("serial_number", "—")
+        rpt = run.get("repeat_number", "—")
+        started = run.get("started_at") or ""
+        finished = run.get("finished_at") or ""
+        overall = run.get("overall_result", "")
 
         self._det_serial.setText(f"Serial: {serial}")
         self._det_rpt.setText(f"Rpt: {rpt}")
