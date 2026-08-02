@@ -17,7 +17,7 @@ import json
 from typing import Any, Callable
 from urllib.parse import quote, urlencode
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QByteArray, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
@@ -60,6 +60,41 @@ class ApiClient:
         reply = self._manager.sendCustomRequest(request, b"PATCH", json.dumps(body).encode("utf-8"))
         self._track(reply, on_success, on_error)
 
+    def _post(
+        self,
+        path: str,
+        body: dict[str, Any],
+        on_success: OnSuccess,
+        on_error: OnError,
+        params: dict[str, str] | None = None,
+    ) -> None:
+        query = f"?{urlencode(params)}" if params else ""
+        request = QNetworkRequest(QUrl(f"{self._base_url}{path}{query}"))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        reply = self._manager.sendCustomRequest(request, b"POST", json.dumps(body).encode("utf-8"))
+        self._track(reply, on_success, on_error)
+
+    def _put(
+        self,
+        path: str,
+        body: dict[str, Any],
+        on_success: OnSuccess,
+        on_error: OnError,
+        params: dict[str, str] | None = None,
+    ) -> None:
+        query = f"?{urlencode(params)}" if params else ""
+        request = QNetworkRequest(QUrl(f"{self._base_url}{path}{query}"))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        reply = self._manager.sendCustomRequest(request, b"PUT", json.dumps(body).encode("utf-8"))
+        self._track(reply, on_success, on_error)
+
+    def _delete(self, path: str, on_success: OnSuccess, on_error: OnError) -> None:
+        request = QNetworkRequest(QUrl(f"{self._base_url}{path}"))
+        # DELETE with an empty body still needs *a* body arg on
+        # sendCustomRequest -- QByteArray() is the documented pattern.
+        reply = self._manager.sendCustomRequest(request, b"DELETE", QByteArray())
+        self._track(reply, on_success, on_error)
+
     def _track(self, reply: QNetworkReply, on_success: OnSuccess, on_error: OnError) -> None:
         self._in_flight.add(reply)
 
@@ -69,8 +104,13 @@ class ApiClient:
             if reply.error() != QNetworkReply.NetworkError.NoError:
                 on_error(reply.errorString())
                 return
+            raw = bytes(reply.readAll().data())
+            if not raw:
+                # 204 No Content (delete endpoints) -- succeed with None.
+                on_success(None)
+                return
             try:
-                payload = json.loads(bytes(reply.readAll().data()))
+                payload = json.loads(raw)
             except json.JSONDecodeError as exc:
                 on_error(f"invalid JSON from backend: {exc}")
                 return
@@ -225,3 +265,50 @@ class ApiClient:
         params = {"gear_label": gear_label, "direction": direction, "channel_name": channel_name}
         body = {"included": included}
         self._patch(path, body, on_success, on_error, params)
+
+    # --- write endpoints (Master Entry creation / gear-edit flows) ---
+
+    def post_model(self, body: dict[str, Any], on_success: OnSuccess, on_error: OnError) -> None:
+        self._post("/models", body, on_success, on_error)
+
+    def put_model(
+        self, model_id: str, body: dict[str, Any], on_success: OnSuccess, on_error: OnError,
+    ) -> None:
+        self._put(f"/models/{quote(model_id)}", body, on_success, on_error)
+
+    def post_program(
+        self, model_id: str, program_name: str, on_success: OnSuccess, on_error: OnError,
+    ) -> None:
+        self._post(
+            f"/models/{quote(model_id)}/programs",
+            {"program_name": program_name},
+            on_success, on_error,
+        )
+
+    def delete_program(
+        self, model_id: str, program_name: str, on_success: OnSuccess, on_error: OnError,
+    ) -> None:
+        self._delete(
+            f"/models/{quote(model_id)}/programs/{quote(program_name)}",
+            on_success, on_error,
+        )
+
+    def post_import_from_master(
+        self,
+        model_id: str,
+        program_name: str,
+        gear_label: str,
+        direction: str,
+        on_success: OnSuccess,
+        on_error: OnError,
+        channel_name: str = "vib_a",
+    ) -> None:
+        """Bulk-seed limit configs for one (gear, direction, channel) from
+        the model's master signatures. Backend endpoint takes an empty
+        POST body with query params."""
+        path = (
+            f"/models/{quote(model_id)}/programs/{quote(program_name)}"
+            f"/import-from-master"
+        )
+        params = {"gear_label": gear_label, "direction": direction, "channel_name": channel_name}
+        self._post(path, {}, on_success, on_error, params)
