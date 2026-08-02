@@ -266,6 +266,9 @@ class ApiClient:
         body = {"included": included}
         self._patch(path, body, on_success, on_error, params)
 
+    def fetch_summaries(self, model_id: str, on_success: OnSuccess, on_error: OnError) -> None:
+        self._get("/summaries", on_success, on_error, {"model_id": quote(model_id)})
+
     # --- write endpoints (Master Entry creation / gear-edit flows) ---
 
     def post_model(self, body: dict[str, Any], on_success: OnSuccess, on_error: OnError) -> None:

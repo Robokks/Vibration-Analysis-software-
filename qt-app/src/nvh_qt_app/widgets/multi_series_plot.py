@@ -158,6 +158,19 @@ class MultiSeriesPlot(GraticuleWidget):
     def series_names(self) -> list[str]:
         return list(self._series.keys())
 
+    def add_series(self, name: str) -> None:
+        if name in self._series:
+            return
+        index = len(self._series)
+        hex_color = _DEFAULT_TRACE_COLORS[index % len(_DEFAULT_TRACE_COLORS)]
+        cfg = SeriesConfig(name=name, color=QColor(hex_color))
+        cfg.buffer = deque(maxlen=self._max_samples)
+        self._series[name] = cfg
+
+    def remove_series(self, name: str) -> None:
+        self._series.pop(name, None)
+        self.update()
+
     def series_config(self, name: str) -> SeriesConfig:
         return self._series[name]
 
