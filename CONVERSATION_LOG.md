@@ -1891,6 +1891,16 @@ Entry GUI plan and implementation (plan by this session, implementation by Opus 
 Reports cascade filter plan + implementation + details-strip bug fix — to both files.
 Committed as this entry's commit and pushed.
 
+### Turn — 2026-08-02: second conversation log + progress update request
+
+**User:** "Update the conversation record in /home/user/Vibration-Analysis-software- (branch claude/nvh-software-python-28zib3) with everything new since the last update. [same standing instruction, sent again]"
+
+**Assistant:** Checked git status (clean — no uncommitted changes), confirmed
+the last recorded turn in `CONVERSATION_LOG.md` was the previous log-sync at
+line 1883 (commit `e5f0549`), and confirmed no new code commits had landed since
+then. No `PROGRESS.md` update needed (no new milestones). Appended this turn
+and committed.
+
 ---
 
 ## Part 1 — Summarized history (pre-compaction, not verbatim)
